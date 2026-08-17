@@ -869,12 +869,21 @@ impl TreeViewState {
             self.directory_descendants
                 .insert(key.clone(), child_statuses.clone());
 
+            let diff_stat = child_statuses
+                .iter()
+                .filter_map(|status| status.diff_stat)
+                .reduce(|acc, stat| DiffStat {
+                    added: acc.added.saturating_add(stat.added),
+                    deleted: acc.deleted.saturating_add(stat.deleted),
+                });
+
             flattened.push((
                 GitListEntry::Directory(GitTreeDirEntry {
                     key,
                     name,
                     depth,
                     expanded,
+                    diff_stat,
                 }),
                 true,
             ));
@@ -938,6 +947,7 @@ struct GitTreeDirEntry {
     depth: usize,
     // staged_state: ToggleState,
     expanded: bool,
+    diff_stat: Option<DiffStat>,
 }
 
 #[derive(Default)]
@@ -8098,6 +8108,7 @@ impl GitPanel {
 
         let name_row = h_flex()
             .min_w_0()
+            .flex_1()
             .gap_1()
             .pl(px(entry.depth as f32 * TREE_INDENT))
             .child(
@@ -8115,6 +8126,8 @@ impl GitPanel {
             )
             .child(self.entry_label(entry.name.clone(), label_color).truncate());
 
+        let id_for_diff_stat = id.clone();
+
         h_flex()
             .id(id)
             .h(self.list_item_height())
@@ -8123,7 +8136,6 @@ impl GitPanel {
             .pl_2p5()
             .pr_1()
             .gap_1p5()
-            .justify_between()
             .border_1()
             .border_r_2()
             .when(selected && self.focus_handle.is_focused(window), |el| {
@@ -8133,6 +8145,16 @@ impl GitPanel {
             .hover(|s| s.bg(hover_bg))
             .active(|s| s.bg(active_bg))
             .child(name_row)
+            .when(settings.diff_stats, |el| {
+                el.when_some(entry.diff_stat, move |this, stat| {
+                    let id = format!("diff-stat-{}", id_for_diff_stat);
+                    this.child(ui::DiffStat::new(
+                        id,
+                        stat.added as usize,
+                        stat.deleted as usize,
+                    ))
+                })
+            })
             .child(
                 div()
                     .id(checkbox_wrapper_id)
@@ -9329,6 +9351,66 @@ mod tests {
             new_entries.first(),
             Some((GitListEntry::Directory(entry), _)) if entry.expanded
         ));
+    }
+
+    #[test]
+    fn test_tree_view_directory_diff_stat_aggregates_descendants() {
+        let entry = |path, diff_stat| GitStatusEntry {
+            repo_path: repo_path(path),
+            status: StatusCode::Modified.worktree(),
+            staging: StageStatus::Unstaged,
+            diff_stat,
+        };
+        let mut state = TreeViewState::default();
+        let mut seen_directories = HashSet::default();
+
+        let entries = state.build_tree_entries(
+            Section::Tracked,
+            vec![
+                entry(
+                    "src/a.rs",
+                    Some(DiffStat {
+                        added: 10,
+                        deleted: 2,
+                    }),
+                ),
+                entry(
+                    "src/nested/b.rs",
+                    Some(DiffStat {
+                        added: 5,
+                        deleted: 1,
+                    }),
+                ),
+                entry("src/nested/c.rs", None),
+                entry("other/d.rs", None),
+            ],
+            &mut seen_directories,
+        );
+
+        let directory_diff_stat = |path: &str| {
+            entries.iter().find_map(|(entry, _)| match entry {
+                GitListEntry::Directory(dir) if dir.key.path == repo_path(path) => {
+                    Some(dir.diff_stat)
+                }
+                _ => None,
+            })
+        };
+
+        assert_eq!(
+            directory_diff_stat("src"),
+            Some(Some(DiffStat {
+                added: 15,
+                deleted: 3,
+            }))
+        );
+        assert_eq!(
+            directory_diff_stat("src/nested"),
+            Some(Some(DiffStat {
+                added: 5,
+                deleted: 1,
+            }))
+        );
+        assert_eq!(directory_diff_stat("other"), Some(None));
     }
 
     fn register_git_commit_language(project: &Entity<Project>, cx: &mut VisualTestContext) {
