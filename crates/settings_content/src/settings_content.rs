@@ -759,6 +759,12 @@ pub struct GitPanelSettingsContent {
     /// Default: false
     pub tree_view: Option<bool>,
 
+    /// Whether parent directories stick to the top of the git panel
+    /// while scrolling in tree view.
+    ///
+    /// Default: false
+    pub sticky_scroll: Option<bool>,
+
     /// Whether to show the addition/deletion change count next to each file in the Git panel.
     ///
     /// Default: true
