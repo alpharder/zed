@@ -7572,6 +7572,7 @@ impl GitPanel {
                                                 ix,
                                                 entry,
                                                 has_write_access,
+                                                false,
                                                 window,
                                                 cx,
                                             ));
@@ -8262,12 +8263,13 @@ impl GitPanel {
                     .w_full()
                     .h(self.list_item_height())
                     .relative()
-                    .occlude()
-                    .bg(cx.theme().colors().panel_background)
+                    .block_mouse_except_scroll()
+                    .bg(cx.theme().colors().panel_overlay_background)
                     .child(self.render_directory_entry(
                         index,
                         &directory,
                         has_write_access,
+                        true,
                         window,
                         cx,
                     ))
@@ -8298,6 +8300,7 @@ impl GitPanel {
         ix: usize,
         entry: &GitTreeDirEntry,
         has_write_access: bool,
+        sticky: bool,
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -8305,11 +8308,15 @@ impl GitPanel {
         let selected = self.selected_entry == Some(ix);
         let label_color = Color::Muted;
 
-        let id: ElementId = ElementId::Name(format!("dir_{}_{}", entry.name, ix).into());
+        // Sticky rows duplicate directory rows that may be visible in the list
+        // at the same time; their element ids must not collide.
+        let id_prefix = if sticky { "sticky_dir" } else { "dir" };
+        let id: ElementId = ElementId::Name(format!("{}_{}_{}", id_prefix, entry.name, ix).into());
         let checkbox_id: ElementId =
-            ElementId::Name(format!("dir_checkbox_{}_{}", entry.name, ix).into());
-        let checkbox_wrapper_id: ElementId =
-            ElementId::Name(format!("dir_checkbox_wrapper_{}_{}", entry.name, ix).into());
+            ElementId::Name(format!("{}_checkbox_{}_{}", id_prefix, entry.name, ix).into());
+        let checkbox_wrapper_id: ElementId = ElementId::Name(
+            format!("{}_checkbox_wrapper_{}_{}", id_prefix, entry.name, ix).into(),
+        );
 
         let selected_bg_alpha = 0.08;
         let state_opacity_step = 0.04;
