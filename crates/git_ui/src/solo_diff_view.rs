@@ -68,14 +68,14 @@ impl SoloDiffView {
             .find(|item| item.read(cx).matches(&repository, &entry.repo_path, cx));
         if let Some(existing) = existing {
             workspace_entity.update(cx, |workspace, cx| {
-                workspace.activate_item(&existing, true, true, window, cx);
-                if !allow_preview
-                    && let Some(pane) = workspace.pane_for(&existing)
-                {
-                    pane.update(cx, |pane, _| {
-                        pane.unpreview_item_if_preview(existing.entity_id());
-                    });
-                }
+                crate::activate_or_add_with_preview(
+                    workspace,
+                    Some(existing.clone()),
+                    allow_preview,
+                    window,
+                    cx,
+                    |_, _, _| existing.clone(),
+                );
             });
             existing.focus_handle(cx).focus(window, cx);
             return Task::ready(Ok(existing));
@@ -120,29 +120,14 @@ impl SoloDiffView {
                     )
                 });
 
-                if allow_preview {
-                    let pane = workspace.active_pane().clone();
-                    pane.update(cx, |pane, cx| {
-                        let destination_index = pane.close_current_preview_item(window, cx);
-                        pane.add_item(
-                            Box::new(view.clone()),
-                            true,
-                            true,
-                            destination_index,
-                            window,
-                            cx,
-                        );
-                        pane.replace_preview_item_id(view.entity_id(), window, cx);
-                    });
-                } else {
-                    workspace.add_item_to_active_pane(
-                        Box::new(view.clone()),
-                        None,
-                        true,
-                        window,
-                        cx,
-                    );
-                }
+                crate::activate_or_add_with_preview(
+                    workspace,
+                    None,
+                    allow_preview,
+                    window,
+                    cx,
+                    |_, _, _| view.clone(),
+                );
                 view
             })
         })

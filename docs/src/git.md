@@ -47,6 +47,8 @@ By default, the Git Panel docks on the left. Go to **Panels > Git Panel** and ch
 
 The Git Panel shows a flat list of changed files by default. To see files organized by folder hierarchy instead, toggle **Tree View** in the panel's context menu, or enable it in **Panels > Git Panel**.
 
+In tree view, all directories can be expanded or collapsed at once with the {#action git_panel::ExpandAllEntries} and {#action git_panel::CollapseAllEntries} actions, the toggle button in the panel header, or the panel's context menu. Two additional tree view options live in the panel's view options menu and in **Panels > Git Panel**: **Sticky Directories** (`git_panel.sticky_scroll`) keeps the parent directories of the topmost visible entry pinned while scrolling, and **Directory Diff Stats** (`git_panel.directory_diff_stats`) shows the cumulative added/deleted line counts next to each directory.
+
 #### Inline Blame
 
 Zed shows Git blame information on the current line. To turn this off or add a delay before it appears, go to **Version Control > Inline Git Blame**.

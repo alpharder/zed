@@ -6264,7 +6264,7 @@ fn panels_page() -> SettingsPage {
                     description: "Enable to show entries in tree view list, disable to show in flat view list.",
                     field: Box::new(SettingField {
                         organization_override: None,
-                        json_path: Some("git_panel.tree_view$"),
+                        json_path: Some("git_panel.tree_view"),
                         pick: |settings_content| {
                             settings_content.git_panel.as_ref()?.tree_view.as_ref()
                         },

@@ -91,8 +91,8 @@ use time::OffsetDateTime;
 use ui::{
     ButtonLike, Checkbox, Chip, ContextMenu, ContextMenuEntry, Divider, DocumentationSide,
     ElevationIndex, IndentGuideColors, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, SplitButton, Tab, TintColor, Tooltip, WithScrollbar,
-    prelude::*,
+    ProjectEmptyState, ScrollAxes, ScrollableHandle, Scrollbars, SplitButton, Tab, TintColor,
+    Tooltip, WithScrollbar, prelude::*,
 };
 use util::paths::PathStyle;
 use util::{ResultExt, TryFutureExt, markdown::MarkdownInlineCode, maybe, rel_path::RelPath};
@@ -322,7 +322,7 @@ fn git_panel_context_menu(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ContextMenu> {
-    ContextMenu::build(window, cx, |context_menu, _, _| {
+    ContextMenu::build(window, cx, |context_menu, _, cx| {
         context_menu
             .context(focus_handle.clone())
             .action_disabled_when(!has_unstaged_changes, "Stage All", StageAll.boxed_clone())
@@ -356,6 +356,12 @@ fn git_panel_context_menu(
             })
             .action_disabled_when(!has_stash_items, "Stash Pop", StashPop.boxed_clone())
             .action("View Stash", zed_actions::git::ViewStash.boxed_clone())
+            .when(GitPanelSettings::get_global(cx).tree_view, |context_menu| {
+                context_menu
+                    .separator()
+                    .action("Expand All", ExpandAllEntries.boxed_clone())
+                    .action("Collapse All", CollapseAllEntries.boxed_clone())
+            })
             .when(include_copy_paths, |context_menu| {
                 context_menu
                     .separator()
@@ -881,7 +887,7 @@ impl TreeViewState {
             }
         }
 
-        let (flattened, _) = self.flatten_tree(&root, section, 0, seen_directories);
+        let (flattened, _, _) = self.flatten_tree(&root, section, 0, seen_directories);
         flattened
     }
 
@@ -891,16 +897,21 @@ impl TreeViewState {
         section: Section,
         depth: usize,
         seen_directories: &mut HashSet<TreeKey>,
-    ) -> (Vec<(GitListEntry, bool)>, Vec<GitStatusEntry>) {
+    ) -> (
+        Vec<(GitListEntry, bool)>,
+        Vec<GitStatusEntry>,
+        Option<DiffStat>,
+    ) {
         let mut all_statuses = Vec::new();
         let mut flattened = Vec::new();
+        let mut subtree_diff_stat = None;
 
         for child in node.children.values() {
             let (terminal, name) = Self::compact_directory_chain(child);
             let Some(path) = terminal.path.clone().or_else(|| child.path.clone()) else {
                 continue;
             };
-            let (child_flattened, mut child_statuses) =
+            let (child_flattened, mut child_statuses, child_diff_stat) =
                 self.flatten_tree(terminal, section, depth + 1, seen_directories);
             let key = TreeKey { section, path };
             let expanded = *self.expanded_dirs.get(&key).unwrap_or(&true);
@@ -910,13 +921,7 @@ impl TreeViewState {
             self.directory_descendants
                 .insert(key.clone(), child_statuses.clone());
 
-            let diff_stat = child_statuses
-                .iter()
-                .filter_map(|status| status.diff_stat)
-                .reduce(|acc, stat| DiffStat {
-                    added: acc.added.saturating_add(stat.added),
-                    deleted: acc.deleted.saturating_add(stat.deleted),
-                });
+            subtree_diff_stat = sum_diff_stats(subtree_diff_stat, child_diff_stat);
 
             flattened.push((
                 GitListEntry::Directory(GitTreeDirEntry {
@@ -924,7 +929,7 @@ impl TreeViewState {
                     name,
                     depth,
                     expanded,
-                    diff_stat,
+                    diff_stat: child_diff_stat,
                 }),
                 true,
             ));
@@ -939,6 +944,7 @@ impl TreeViewState {
         }
 
         for file in &node.files {
+            subtree_diff_stat = sum_diff_stats(subtree_diff_stat, file.diff_stat);
             all_statuses.push(file.clone());
             flattened.push((
                 GitListEntry::TreeStatus(GitTreeStatusEntry {
@@ -949,7 +955,7 @@ impl TreeViewState {
             ));
         }
 
-        (flattened, all_statuses)
+        (flattened, all_statuses, subtree_diff_stat)
     }
 
     fn compact_directory_chain(mut node: &TreeNode) -> (&TreeNode, SharedString) {
@@ -997,6 +1003,17 @@ struct TreeNode {
     path: Option<RepoPath>,
     children: BTreeMap<SharedString, TreeNode>,
     files: Vec<GitStatusEntry>,
+}
+
+fn sum_diff_stats(accumulated: Option<DiffStat>, stat: Option<DiffStat>) -> Option<DiffStat> {
+    match (accumulated, stat) {
+        (Some(accumulated), Some(stat)) => Some(DiffStat {
+            added: accumulated.added.saturating_add(stat.added),
+            deleted: accumulated.deleted.saturating_add(stat.deleted),
+        }),
+        (accumulated, None) => accumulated,
+        (None, stat) => stat,
+    }
 }
 
 #[derive(Clone)]
@@ -1126,6 +1143,7 @@ pub struct GitPanel {
     entry_count: usize,
     changes_count: usize,
     diff_stat_total: DiffStat,
+    sticky_items_count: usize,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
     pending_remote_operation: Option<RemoteOperationKind>,
@@ -1293,6 +1311,8 @@ impl GitPanel {
             let mut was_file_icons = GitPanelSettings::get_global(cx).file_icons;
             let mut was_folder_icons = GitPanelSettings::get_global(cx).folder_icons;
             let mut was_diff_stats = GitPanelSettings::get_global(cx).diff_stats;
+            let mut was_sticky_scroll = GitPanelSettings::get_global(cx).sticky_scroll;
+            let mut was_directory_diff_stats = GitPanelSettings::get_global(cx).directory_diff_stats;
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
                 let settings = GitPanelSettings::get_global(cx);
                 let sort_by = settings.sort_by;
@@ -1301,6 +1321,8 @@ impl GitPanel {
                 let file_icons = settings.file_icons;
                 let folder_icons = settings.folder_icons;
                 let diff_stats = settings.diff_stats;
+                let sticky_scroll = settings.sticky_scroll;
+                let directory_diff_stats = settings.directory_diff_stats;
                 if tree_view != was_tree_view {
                     match (&mut this.view_mode, tree_view) {
                         (GitPanelViewMode::Tree(state), false) => {
@@ -1326,7 +1348,14 @@ impl GitPanel {
                 if (diff_stats != was_diff_stats) || update_entries {
                     this.update_visible_entries(window, cx);
                 }
-                if file_icons != was_file_icons || folder_icons != was_folder_icons {
+                if !sticky_scroll {
+                    this.sticky_items_count = 0;
+                }
+                if file_icons != was_file_icons
+                    || folder_icons != was_folder_icons
+                    || sticky_scroll != was_sticky_scroll
+                    || directory_diff_stats != was_directory_diff_stats
+                {
                     cx.notify();
                 }
                 was_sort_by = sort_by;
@@ -1335,6 +1364,8 @@ impl GitPanel {
                 was_file_icons = file_icons;
                 was_folder_icons = folder_icons;
                 was_diff_stats = diff_stats;
+                was_sticky_scroll = sticky_scroll;
+                was_directory_diff_stats = directory_diff_stats;
             })
             .detach();
 
@@ -1427,6 +1458,7 @@ impl GitPanel {
                 new_staged_count: 0,
                 changes_count: 0,
                 diff_stat_total: DiffStat::default(),
+                sticky_items_count: 0,
                 pending_commit: None,
                 pending_remote_operation: None,
                 amend_pending,
@@ -1724,8 +1756,13 @@ impl GitPanel {
         };
 
         if let Some(visible_index) = visible_index {
-            self.scroll_handle
-                .scroll_to_item(visible_index, ScrollStrategy::Center);
+            // Entries in the top rows can be covered by the sticky directory
+            // overlay; offset the visibility check by its height.
+            self.scroll_handle.scroll_to_item_with_offset(
+                visible_index,
+                ScrollStrategy::Center,
+                self.sticky_items_count,
+            );
         }
 
         cx.notify();
@@ -1848,6 +1885,27 @@ impl GitPanel {
             *value = expanded;
         }
         self.tree_expanded_dirs = state.expanded_dirs.clone();
+        // Collapsing everything would leave the selection on a hidden entry,
+        // deadening keyboard navigation; retarget it to the top-level ancestor
+        // directory, which stays visible.
+        if !expanded
+            && let Some(selected_ix) = self.selected_entry
+            && self
+                .entries
+                .get(selected_ix)
+                .is_some_and(|entry| entry.depth() > 0)
+        {
+            for index in (0..selected_ix).rev() {
+                match self.entries.get(index) {
+                    Some(GitListEntry::Directory(directory)) if directory.depth == 0 => {
+                        self.selected_entry = Some(index);
+                        break;
+                    }
+                    Some(GitListEntry::Header(_)) => break,
+                    _ => {}
+                }
+            }
+        }
         self.update_visible_entries(window, cx);
     }
 
@@ -2229,43 +2287,46 @@ impl GitPanel {
                         .project_path_to_repo_path(&project_path, cx)
                         .as_ref()
             {
+                if !allow_preview
+                    && let Some(pane) = workspace.read(cx).pane_for(&project_diff)
+                {
+                    pane.update(cx, |pane, _| {
+                        pane.unpreview_item_if_preview(project_diff.entity_id());
+                    });
+                }
                 project_diff.focus_handle(cx).focus(window, cx);
                 project_diff.update(cx, |project_diff, cx| project_diff.autoscroll(cx));
                 return None;
             };
 
             self.workspace
-                .update(cx, |workspace, cx| {
-                    let existed = match target {
-                        DiffTarget::Uncommitted => {
-                            workspace.item_of_type::<ProjectDiff>(cx).is_some()
-                        }
-                        DiffTarget::Staged => workspace.item_of_type::<StagedDiff>(cx).is_some(),
-                        DiffTarget::Unstaged => {
-                            workspace.item_of_type::<UnstagedDiff>(cx).is_some()
-                        }
-                    };
-                    match target {
-                        DiffTarget::Uncommitted => {
-                            ProjectDiff::deploy_at(workspace, Some(entry.clone()), window, cx);
-                        }
-                        DiffTarget::Staged => {
-                            StagedDiff::deploy_at(workspace, Some(entry.clone()), window, cx);
-                        }
-                        DiffTarget::Unstaged => {
-                            UnstagedDiff::deploy_at(workspace, Some(entry.clone()), window, cx);
-                        }
+                .update(cx, |workspace, cx| match target {
+                    DiffTarget::Uncommitted => {
+                        ProjectDiff::deploy_at(
+                            workspace,
+                            Some(entry.clone()),
+                            allow_preview,
+                            window,
+                            cx,
+                        );
                     }
-                    if let Some(active_item) = workspace.active_item(cx)
-                        && let Some(pane) = workspace.pane_for(active_item.as_ref())
-                    {
-                        pane.update(cx, |pane, cx| {
-                            if allow_preview && !existed {
-                                pane.replace_preview_item_id(active_item.item_id(), window, cx);
-                            } else if !allow_preview {
-                                pane.unpreview_item_if_preview(active_item.item_id());
-                            }
-                        });
+                    DiffTarget::Staged => {
+                        StagedDiff::deploy_at(
+                            workspace,
+                            Some(entry.clone()),
+                            allow_preview,
+                            window,
+                            cx,
+                        );
+                    }
+                    DiffTarget::Unstaged => {
+                        UnstagedDiff::deploy_at(
+                            workspace,
+                            Some(entry.clone()),
+                            allow_preview,
+                            window,
+                            cx,
+                        );
                     }
                 })
                 .ok();
@@ -4686,7 +4747,7 @@ impl GitPanel {
             .cloned();
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
-                StagedDiff::deploy_at(workspace, entry, window, cx);
+                StagedDiff::deploy_at(workspace, entry, false, window, cx);
             });
         }
     }
@@ -4703,7 +4764,7 @@ impl GitPanel {
             .cloned();
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
-                UnstagedDiff::deploy_at(workspace, entry, window, cx);
+                UnstagedDiff::deploy_at(workspace, entry, false, window, cx);
             });
         }
     }
@@ -4745,17 +4806,15 @@ impl GitPanel {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current_setting = GitPanelSettings::get_global(cx).sticky_scroll;
-        if let Some(workspace) = self.workspace.upgrade() {
-            let workspace = workspace.read(cx);
-            let fs = workspace.app_state().fs.clone();
-            cx.update_global::<SettingsStore, _>(|store, _cx| {
-                store.update_settings_file(fs, move |settings, _cx| {
-                    settings.git_panel.get_or_insert_default().sticky_scroll =
-                        Some(!current_setting);
-                });
-            })
-        }
+        // Read the current value inside the closure so rapid repeated toggles
+        // queue up as sequential negations instead of racing the async write.
+        update_settings_file(self.fs.clone(), cx, |settings, cx| {
+            let git_panel = settings.git_panel.get_or_insert_default();
+            let current = git_panel
+                .sticky_scroll
+                .unwrap_or_else(|| GitPanelSettings::get_global(cx).sticky_scroll);
+            git_panel.sticky_scroll = Some(!current);
+        });
     }
 
     fn toggle_directory_diff_stats(
@@ -4764,17 +4823,13 @@ impl GitPanel {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current_setting = GitPanelSettings::get_global(cx).directory_diff_stats;
-        if let Some(workspace) = self.workspace.upgrade() {
-            let workspace = workspace.read(cx);
-            let fs = workspace.app_state().fs.clone();
-            cx.update_global::<SettingsStore, _>(|store, _cx| {
-                store.update_settings_file(fs, move |settings, _cx| {
-                    settings.git_panel.get_or_insert_default().directory_diff_stats =
-                        Some(!current_setting);
-                });
-            })
-        }
+        update_settings_file(self.fs.clone(), cx, |settings, cx| {
+            let git_panel = settings.git_panel.get_or_insert_default();
+            let current = git_panel
+                .directory_diff_stats
+                .unwrap_or_else(|| GitPanelSettings::get_global(cx).directory_diff_stats);
+            git_panel.directory_diff_stats = Some(!current);
+        });
     }
 
     pub(crate) fn increase_font_size(
@@ -6246,29 +6301,34 @@ impl GitPanel {
                                 self.view_mode.tree_state().is_some_and(|state| {
                                     state.expanded_dirs.values().any(|expanded| *expanded)
                                 });
-                            this.child(if any_expanded {
-                                IconButton::new("collapse-all-entries", IconName::ChevronDownUp)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::for_action_title_in(
+                            let (id, icon, label, action): (_, _, _, Box<dyn Action>) =
+                                if any_expanded {
+                                    (
+                                        "collapse-all-entries",
+                                        IconName::ChevronDownUp,
                                         "Collapse All Entries",
-                                        &CollapseAllEntries,
-                                        &self.focus_handle,
-                                    ))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_all_directories_expanded(false, window, cx);
-                                    }))
-                            } else {
-                                IconButton::new("expand-all-entries", IconName::ChevronUpDown)
+                                        CollapseAllEntries.boxed_clone(),
+                                    )
+                                } else {
+                                    (
+                                        "expand-all-entries",
+                                        IconName::ChevronUpDown,
+                                        "Expand All Entries",
+                                        ExpandAllEntries.boxed_clone(),
+                                    )
+                                };
+                            this.child(
+                                IconButton::new(id, icon)
                                     .icon_size(IconSize::Small)
                                     .tooltip(Tooltip::for_action_title_in(
-                                        "Expand All Entries",
-                                        &ExpandAllEntries,
+                                        label,
+                                        action.as_ref(),
                                         &self.focus_handle,
                                     ))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_all_directories_expanded(true, window, cx);
-                                    }))
-                            })
+                                    .on_click(move |_, window, cx| {
+                                        window.dispatch_action(action.boxed_clone(), cx);
+                                    }),
+                            )
                         })
                         .child(self.render_view_options_menu("view_options_menu"))
                         .child(self.render_git_changes_actions_button(cx)),
@@ -7562,7 +7622,15 @@ impl GitPanel {
             GitPanelViewMode::Tree(state) => (true, state.logical_indices.len()),
             GitPanelViewMode::Flat => (false, self.visible_flat_entry_indices().len()),
         };
-        let sticky_scroll = GitPanelSettings::get_global(cx).sticky_scroll;
+        let show_sticky_entries = {
+            if GitPanelSettings::get_global(cx).sticky_scroll {
+                let is_scrollable = self.scroll_handle.is_scrollable();
+                let is_scrolled = self.scroll_handle.offset().y < px(0.);
+                is_scrollable && is_scrolled
+            } else {
+                false
+            }
+        };
         let repo = repo.downgrade();
 
         v_flex()
@@ -7664,7 +7732,7 @@ impl GitPanel {
                                     ),
                             )
                         })
-                        .when(is_tree_view && sticky_scroll, |list| {
+                        .when(is_tree_view && show_sticky_entries, |list| {
                             list.with_decoration(ui::sticky_items(
                                 cx.entity(),
                                 |this, range: Range<usize>, _window, _cx| {
@@ -7687,8 +7755,19 @@ impl GitPanel {
                                     items
                                 },
                                 move |this, anchor, window, cx| {
-                                    this.render_sticky_entries(anchor, has_write_access, window, cx)
+                                    let sticky_entries = this.render_sticky_entries(
+                                        anchor,
+                                        has_write_access,
+                                        window,
+                                        cx,
+                                    );
+                                    this.sticky_items_count = sticky_entries.len();
+                                    sticky_entries
                                 },
+                            )
+                            .with_decoration(
+                                ui::indent_guides(px(TREE_INDENT), IndentGuideColors::panel(cx))
+                                    .with_left_offset(INDENT_GUIDE_LEFT_OFFSET),
                             ))
                         })
                         .group("entries")
@@ -8294,10 +8373,10 @@ impl GitPanel {
             return SmallVec::new();
         }
 
-        // Walking backwards from the anchor, the first directory shallower than
-        // the current depth is the parent, the next shallower one is the
-        // grandparent, and so on. A section header ends the chain.
-        let mut parents: Vec<(usize, GitTreeDirEntry)> = Vec::new();
+        // `entries` is a pre-order flattening that includes hidden rows, so the
+        // ancestor chain is found by decreasing depth; a section header
+        // terminates it.
+        let mut parents: Vec<(usize, &GitTreeDirEntry)> = Vec::new();
         let mut want_depth = anchor_entry.depth();
         for index in (0..anchor.index).rev() {
             if want_depth == 0 {
@@ -8306,7 +8385,7 @@ impl GitPanel {
             match self.entries.get(index) {
                 Some(GitListEntry::Directory(directory)) if directory.depth < want_depth => {
                     want_depth = directory.depth;
-                    parents.push((index, directory.clone()));
+                    parents.push((index, directory));
                 }
                 Some(GitListEntry::Header(_)) => break,
                 _ => {}
@@ -8331,7 +8410,7 @@ impl GitPanel {
                     .bg(cx.theme().colors().panel_overlay_background)
                     .child(self.render_directory_entry(
                         index,
-                        &directory,
+                        directory,
                         has_write_access,
                         true,
                         window,
@@ -8374,13 +8453,19 @@ impl GitPanel {
 
         // Sticky rows duplicate directory rows that may be visible in the list
         // at the same time; their element ids must not collide.
-        let id_prefix = if sticky { "sticky_dir" } else { "dir" };
-        let id: ElementId = ElementId::Name(format!("{}_{}_{}", id_prefix, entry.name, ix).into());
-        let checkbox_id: ElementId =
-            ElementId::Name(format!("{}_checkbox_{}_{}", id_prefix, entry.name, ix).into());
-        let checkbox_wrapper_id: ElementId = ElementId::Name(
-            format!("{}_checkbox_wrapper_{}_{}", id_prefix, entry.name, ix).into(),
-        );
+        let (id, checkbox_id, checkbox_wrapper_id): (ElementId, ElementId, ElementId) = if sticky {
+            (
+                ("sticky_dir", ix).into(),
+                ("sticky_dir_checkbox", ix).into(),
+                ("sticky_dir_checkbox_wrapper", ix).into(),
+            )
+        } else {
+            (
+                ("dir", ix).into(),
+                ("dir_checkbox", ix).into(),
+                ("dir_checkbox_wrapper", ix).into(),
+            )
+        };
 
         let selected_bg_alpha = 0.08;
         let state_opacity_step = 0.04;
@@ -8459,8 +8544,6 @@ impl GitPanel {
             )
             .child(self.entry_label(entry.name.clone(), label_color).truncate());
 
-        let id_for_diff_stat = id.clone();
-
         h_flex()
             .id(id)
             .h(self.list_item_height())
@@ -8480,7 +8563,11 @@ impl GitPanel {
             .child(name_row)
             .when(settings.diff_stats && settings.directory_diff_stats, |el| {
                 el.when_some(entry.diff_stat, move |this, stat| {
-                    let id = format!("diff-stat-{}", id_for_diff_stat);
+                    let id: ElementId = if sticky {
+                        ("sticky_dir_diff_stat", ix).into()
+                    } else {
+                        ("dir_diff_stat", ix).into()
+                    };
                     this.child(ui::DiffStat::new(
                         id,
                         stat.added as usize,
@@ -12742,6 +12829,16 @@ mod tests {
         };
 
         panel.update_in(cx, |panel, window, cx| {
+            let file_index = panel
+                .entries
+                .iter()
+                .position(|entry| {
+                    entry
+                        .status_entry()
+                        .is_some_and(|status| status.repo_path == repo_path("src/a/foo.rs"))
+                })
+                .expect("file entry should exist");
+            panel.selected_entry = Some(file_index);
             panel.collapse_all_entries(&CollapseAllEntries, window, cx);
         });
         await_git_panel_entries(&panel, cx).await;
@@ -12753,6 +12850,18 @@ mod tests {
                 .expect("tree view state should exist");
             assert!(state.expanded_dirs.values().all(|expanded| !expanded));
             assert_eq!(visible_paths(panel), vec![repo_path("src")]);
+
+            let selected_index = panel
+                .selected_entry
+                .expect("selection should survive collapse all");
+            assert!(
+                state.logical_indices.contains(&selected_index),
+                "selection should point at a visible entry"
+            );
+            assert!(matches!(
+                panel.entries.get(selected_index),
+                Some(GitListEntry::Directory(directory)) if directory.key.path == repo_path("src")
+            ));
         });
 
         panel.update_in(cx, |panel, window, cx| {
