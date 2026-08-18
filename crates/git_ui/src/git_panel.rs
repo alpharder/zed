@@ -161,6 +161,8 @@ actions!(
         CollapseAllEntries,
         /// Toggles sticky directories while scrolling the tree view.
         ToggleStickyScroll,
+        /// Toggles cumulative diff stats for directories in the tree view.
+        ToggleDirectoryDiffStats,
         /// View unstaged changes
         ViewUnstagedChanges,
         /// View staged changes
@@ -206,6 +208,7 @@ struct GitPanelViewOptionsMenuState {
     group_by: GitPanelGroupBy,
     tree_view: bool,
     sticky_scroll: bool,
+    directory_diff_stats: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -382,6 +385,7 @@ fn git_panel_view_options_menu(
         group_by: GitPanelSettings::get_global(cx).group_by,
         tree_view: GitPanelSettings::get_global(cx).tree_view,
         sticky_scroll: GitPanelSettings::get_global(cx).sticky_scroll,
+        directory_diff_stats: GitPanelSettings::get_global(cx).directory_diff_stats,
     }));
 
     ContextMenu::build_persistent(window, cx, move |context_menu, _, _| {
@@ -419,18 +423,32 @@ fn git_panel_view_options_menu(
                     })
             })
             .when(state.tree_view, |this| {
-                this.separator().header("Tree").item({
-                    let view_options_menu_state = view_options_menu_state.clone();
-                    ContextMenuEntry::new("Sticky Directories")
-                        .toggle(IconPosition::End, state.sticky_scroll)
-                        .handler(move |window, cx| {
-                            view_options_menu_state.set(GitPanelViewOptionsMenuState {
-                                sticky_scroll: !state.sticky_scroll,
-                                ..state
-                            });
-                            window.dispatch_action(Box::new(ToggleStickyScroll), cx);
-                        })
-                })
+                this.separator()
+                    .header("Tree")
+                    .item({
+                        let view_options_menu_state = view_options_menu_state.clone();
+                        ContextMenuEntry::new("Sticky Directories")
+                            .toggle(IconPosition::End, state.sticky_scroll)
+                            .handler(move |window, cx| {
+                                view_options_menu_state.set(GitPanelViewOptionsMenuState {
+                                    sticky_scroll: !state.sticky_scroll,
+                                    ..state
+                                });
+                                window.dispatch_action(Box::new(ToggleStickyScroll), cx);
+                            })
+                    })
+                    .item({
+                        let view_options_menu_state = view_options_menu_state.clone();
+                        ContextMenuEntry::new("Directory Diff Stats")
+                            .toggle(IconPosition::End, state.directory_diff_stats)
+                            .handler(move |window, cx| {
+                                view_options_menu_state.set(GitPanelViewOptionsMenuState {
+                                    directory_diff_stats: !state.directory_diff_stats,
+                                    ..state
+                                });
+                                window.dispatch_action(Box::new(ToggleDirectoryDiffStats), cx);
+                            })
+                    })
             })
             .when(!state.tree_view, |this| {
                 this.separator()
@@ -4684,6 +4702,25 @@ impl GitPanel {
         }
     }
 
+    fn toggle_directory_diff_stats(
+        &mut self,
+        _: &ToggleDirectoryDiffStats,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current_setting = GitPanelSettings::get_global(cx).directory_diff_stats;
+        if let Some(workspace) = self.workspace.upgrade() {
+            let workspace = workspace.read(cx);
+            let fs = workspace.app_state().fs.clone();
+            cx.update_global::<SettingsStore, _>(|store, _cx| {
+                store.update_settings_file(fs, move |settings, _cx| {
+                    settings.git_panel.get_or_insert_default().directory_diff_stats =
+                        Some(!current_setting);
+                });
+            })
+        }
+    }
+
     pub(crate) fn increase_font_size(
         &mut self,
         action: &IncreaseBufferFontSize,
@@ -6149,20 +6186,12 @@ impl GitPanel {
                     h_flex()
                         .gap_1()
                         .when(GitPanelSettings::get_global(cx).tree_view, |this| {
-                            this.child(
-                                IconButton::new("expand-all-entries", IconName::ExpandVertical)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::for_action_title_in(
-                                        "Expand All Entries",
-                                        &ExpandAllEntries,
-                                        &self.focus_handle,
-                                    ))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_all_directories_expanded(true, window, cx);
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("collapse-all-entries", IconName::FoldVertical)
+                            let any_expanded =
+                                self.view_mode.tree_state().is_some_and(|state| {
+                                    state.expanded_dirs.values().any(|expanded| *expanded)
+                                });
+                            this.child(if any_expanded {
+                                IconButton::new("collapse-all-entries", IconName::ChevronDownUp)
                                     .icon_size(IconSize::Small)
                                     .tooltip(Tooltip::for_action_title_in(
                                         "Collapse All Entries",
@@ -6171,8 +6200,19 @@ impl GitPanel {
                                     ))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.set_all_directories_expanded(false, window, cx);
-                                    })),
-                            )
+                                    }))
+                            } else {
+                                IconButton::new("expand-all-entries", IconName::ChevronUpDown)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::for_action_title_in(
+                                        "Expand All Entries",
+                                        &ExpandAllEntries,
+                                        &self.focus_handle,
+                                    ))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_all_directories_expanded(true, window, cx);
+                                    }))
+                            })
                         })
                         .child(self.render_view_options_menu("view_options_menu"))
                         .child(self.render_git_changes_actions_button(cx)),
@@ -8367,7 +8407,7 @@ impl GitPanel {
             .hover(|s| s.bg(hover_bg))
             .active(|s| s.bg(active_bg))
             .child(name_row)
-            .when(settings.diff_stats, |el| {
+            .when(settings.diff_stats && settings.directory_diff_stats, |el| {
                 el.when_some(entry.diff_stat, move |this, stat| {
                     let id = format!("diff-stat-{}", id_for_diff_stat);
                     this.child(ui::DiffStat::new(
@@ -8796,6 +8836,7 @@ impl Render for GitPanel {
             .on_action(cx.listener(Self::set_group_by_staging))
             .on_action(cx.listener(Self::toggle_tree_view))
             .on_action(cx.listener(Self::toggle_sticky_scroll))
+            .on_action(cx.listener(Self::toggle_directory_diff_stats))
             .on_action(cx.listener(Self::expand_all_entries))
             .on_action(cx.listener(Self::collapse_all_entries))
             .on_action(cx.listener(Self::increase_font_size))
