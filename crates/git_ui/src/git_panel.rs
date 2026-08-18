@@ -155,6 +155,10 @@ actions!(
         ExpandSelectedEntry,
         /// Collapses the selected entry to hide its children.
         CollapseSelectedEntry,
+        /// Expands all directories in the tree view.
+        ExpandAllEntries,
+        /// Collapses all directories in the tree view.
+        CollapseAllEntries,
         /// View unstaged changes
         ViewUnstagedChanges,
         /// View staged changes
@@ -311,7 +315,7 @@ fn git_panel_context_menu(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ContextMenu> {
-    ContextMenu::build(window, cx, |context_menu, _, _| {
+    ContextMenu::build(window, cx, |context_menu, _, cx| {
         context_menu
             .context(focus_handle.clone())
             .action_disabled_when(!has_unstaged_changes, "Stage All", StageAll.boxed_clone())
@@ -345,6 +349,12 @@ fn git_panel_context_menu(
             })
             .action_disabled_when(!has_stash_items, "Stash Pop", StashPop.boxed_clone())
             .action("View Stash", zed_actions::git::ViewStash.boxed_clone())
+            .when(GitPanelSettings::get_global(cx).tree_view, |context_menu| {
+                context_menu
+                    .separator()
+                    .action("Expand All", ExpandAllEntries.boxed_clone())
+                    .action("Collapse All", CollapseAllEntries.boxed_clone())
+            })
             .when(include_copy_paths, |context_menu| {
                 context_menu
                     .separator()
@@ -1752,6 +1762,61 @@ impl GitPanel {
             self.selected_entry = Some(index);
             self.scroll_to_selected_entry(cx);
         }
+    }
+
+    fn expand_all_entries(
+        &mut self,
+        _: &ExpandAllEntries,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_all_directories_expanded(true, window, cx);
+    }
+
+    fn collapse_all_entries(
+        &mut self,
+        _: &CollapseAllEntries,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_all_directories_expanded(false, window, cx);
+    }
+
+    fn set_all_directories_expanded(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.view_mode.tree_state_mut() else {
+            return;
+        };
+        for value in state.expanded_dirs.values_mut() {
+            *value = expanded;
+        }
+        self.tree_expanded_dirs = state.expanded_dirs.clone();
+        // Collapsing everything would leave the selection on a hidden entry,
+        // deadening keyboard navigation; retarget it to the top-level ancestor
+        // directory, which stays visible.
+        if !expanded
+            && let Some(selected_ix) = self.selected_entry
+            && self
+                .entries
+                .get(selected_ix)
+                .is_some_and(|entry| entry.depth() > 0)
+        {
+            for index in (0..selected_ix).rev() {
+                match self.entries.get(index) {
+                    Some(GitListEntry::Directory(directory)) if directory.depth == 0 => {
+                        self.selected_entry = Some(index);
+                        break;
+                    }
+                    Some(GitListEntry::Header(_)) => break,
+                    _ => {}
+                }
+            }
+        }
+        self.update_visible_entries(window, cx);
     }
 
     fn select_first(
@@ -6051,6 +6116,40 @@ impl GitPanel {
                 .child(
                     h_flex()
                         .gap_1()
+                        .when(GitPanelSettings::get_global(cx).tree_view, |this| {
+                            let any_expanded =
+                                self.view_mode.tree_state().is_some_and(|state| {
+                                    state.expanded_dirs.values().any(|expanded| *expanded)
+                                });
+                            let (id, icon, label, action): (_, _, _, Box<dyn Action>) =
+                                if any_expanded {
+                                    (
+                                        "collapse-all-entries",
+                                        IconName::ChevronDownUp,
+                                        "Collapse All Entries",
+                                        CollapseAllEntries.boxed_clone(),
+                                    )
+                                } else {
+                                    (
+                                        "expand-all-entries",
+                                        IconName::ChevronUpDown,
+                                        "Expand All Entries",
+                                        ExpandAllEntries.boxed_clone(),
+                                    )
+                                };
+                            this.child(
+                                IconButton::new(id, icon)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::for_action_title_in(
+                                        label,
+                                        action.as_ref(),
+                                        &self.focus_handle,
+                                    ))
+                                    .on_click(move |_, window, cx| {
+                                        window.dispatch_action(action.boxed_clone(), cx);
+                                    }),
+                            )
+                        })
                         .child(self.render_view_options_menu("view_options_menu"))
                         .child(self.render_git_changes_actions_button(cx)),
                 ),
@@ -8551,6 +8650,8 @@ impl Render for GitPanel {
             .on_action(cx.listener(Self::set_group_by_status))
             .on_action(cx.listener(Self::set_group_by_staging))
             .on_action(cx.listener(Self::toggle_tree_view))
+            .on_action(cx.listener(Self::expand_all_entries))
+            .on_action(cx.listener(Self::collapse_all_entries))
             .on_action(cx.listener(Self::increase_font_size))
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))
@@ -9329,6 +9430,142 @@ mod tests {
             new_entries.first(),
             Some((GitListEntry::Directory(entry), _)) if entry.expanded
         ));
+    }
+
+    #[gpui::test]
+    async fn test_tree_view_expand_and_collapse_all_entries(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "src": {
+                    "a": {
+                        "foo.rs": "fn foo() {}",
+                    },
+                    "b": {
+                        "bar.rs": "fn bar() {}",
+                    },
+                },
+            }),
+        )
+        .await;
+
+        fs.set_status_for_repo(
+            path!("/project/.git").as_ref(),
+            &[
+                ("src/a/foo.rs", StatusCode::Modified.worktree()),
+                ("src/b/bar.rs", StatusCode::Modified.worktree()),
+            ],
+        );
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+
+        cx.executor().run_until_parked();
+
+        cx.update(|_window, cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.git_panel.get_or_insert_default().tree_view = Some(true);
+                })
+            });
+        });
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+        await_git_panel_entries(&panel, cx).await;
+
+        let visible_paths = |panel: &GitPanel| -> Vec<RepoPath> {
+            let state = panel
+                .view_mode
+                .tree_state()
+                .expect("tree view state should exist");
+            state
+                .logical_indices
+                .iter()
+                .filter_map(|&index| panel.entries.get(index))
+                .filter_map(|entry| entry.repo_path().cloned())
+                .collect()
+        };
+
+        panel.update_in(cx, |panel, window, cx| {
+            let file_index = panel
+                .entries
+                .iter()
+                .position(|entry| {
+                    entry
+                        .status_entry()
+                        .is_some_and(|status| status.repo_path == repo_path("src/a/foo.rs"))
+                })
+                .expect("file entry should exist");
+            panel.selected_entry = Some(file_index);
+            panel.collapse_all_entries(&CollapseAllEntries, window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            let state = panel
+                .view_mode
+                .tree_state()
+                .expect("tree view state should exist");
+            assert!(state.expanded_dirs.values().all(|expanded| !expanded));
+            assert_eq!(visible_paths(panel), vec![repo_path("src")]);
+
+            let selected_index = panel
+                .selected_entry
+                .expect("selection should survive collapse all");
+            assert!(
+                state.logical_indices.contains(&selected_index),
+                "selection should point at a visible entry"
+            );
+            assert!(matches!(
+                panel.entries.get(selected_index),
+                Some(GitListEntry::Directory(directory)) if directory.key.path == repo_path("src")
+            ));
+        });
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel.expand_all_entries(&ExpandAllEntries, window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            let state = panel
+                .view_mode
+                .tree_state()
+                .expect("tree view state should exist");
+            assert!(state.expanded_dirs.values().all(|expanded| *expanded));
+            assert_eq!(
+                visible_paths(panel),
+                vec![
+                    repo_path("src"),
+                    repo_path("src/a"),
+                    repo_path("src/a/foo.rs"),
+                    repo_path("src/b"),
+                    repo_path("src/b/bar.rs"),
+                ]
+            );
+        });
     }
 
     fn register_git_commit_language(project: &Entity<Project>, cx: &mut VisualTestContext) {
