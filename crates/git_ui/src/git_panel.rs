@@ -5698,18 +5698,18 @@ impl GitPanel {
                         else {
                             return context_menu;
                         };
-                        let toggle = |panel: &WeakEntity<GitPanel>,
-                                      apply: fn(&mut GitStatusFilter)| {
-                            let panel = panel.clone();
-                            move |window: &mut Window, cx: &mut App| {
-                                panel
-                                    .update(cx, |panel, cx| {
-                                        apply(&mut panel.status_filter);
-                                        panel.update_visible_entries(window, cx);
-                                    })
-                                    .ok();
-                            }
-                        };
+                        let toggle =
+                            |panel: &WeakEntity<GitPanel>, apply: fn(&mut GitStatusFilter)| {
+                                let panel = panel.clone();
+                                move |window: &mut Window, cx: &mut App| {
+                                    panel
+                                        .update(cx, |panel, cx| {
+                                            apply(&mut panel.status_filter);
+                                            panel.update_visible_entries(window, cx);
+                                        })
+                                        .ok();
+                                }
+                            };
                         context_menu
                             .header("Display")
                             .toggleable_entry(
@@ -5733,9 +5733,7 @@ impl GitPanel {
                                 filter.show_deleted,
                                 IconPosition::End,
                                 None,
-                                toggle(&panel, |filter| {
-                                    filter.show_deleted = !filter.show_deleted
-                                }),
+                                toggle(&panel, |filter| filter.show_deleted = !filter.show_deleted),
                             )
                     },
                 ))
