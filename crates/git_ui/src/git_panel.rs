@@ -7517,42 +7517,49 @@ impl GitPanel {
                             )
                         })
                         .when(is_tree_view && show_sticky_entries, |list| {
-                            list.with_decoration(ui::sticky_items(
-                                cx.entity(),
-                                |this, range: Range<usize>, _window, _cx| {
-                                    let mut items = SmallVec::new();
-                                    if let Some(state) = this.view_mode.tree_state() {
-                                        for ix in range {
-                                            let Some(&entry_index) = state.logical_indices.get(ix)
-                                            else {
-                                                continue;
-                                            };
-                                            let Some(entry) = this.entries.get(entry_index) else {
-                                                continue;
-                                            };
-                                            items.push(StickyGitPanelCandidate {
-                                                index: entry_index,
-                                                depth: entry.depth(),
-                                            });
+                            list.with_decoration(
+                                ui::sticky_items(
+                                    cx.entity(),
+                                    |this, range: Range<usize>, _window, _cx| {
+                                        let mut items = SmallVec::new();
+                                        if let Some(state) = this.view_mode.tree_state() {
+                                            for ix in range {
+                                                let Some(&entry_index) =
+                                                    state.logical_indices.get(ix)
+                                                else {
+                                                    continue;
+                                                };
+                                                let Some(entry) = this.entries.get(entry_index)
+                                                else {
+                                                    continue;
+                                                };
+                                                items.push(StickyGitPanelCandidate {
+                                                    index: entry_index,
+                                                    depth: entry.depth(),
+                                                });
+                                            }
                                         }
-                                    }
-                                    items
-                                },
-                                move |this, anchor, window, cx| {
-                                    let sticky_entries = this.render_sticky_entries(
-                                        anchor,
-                                        has_write_access,
-                                        window,
-                                        cx,
-                                    );
-                                    this.sticky_items_count = sticky_entries.len();
-                                    sticky_entries
-                                },
-                            )
-                            .with_decoration(
-                                ui::indent_guides(px(TREE_INDENT), IndentGuideColors::panel(cx))
+                                        items
+                                    },
+                                    move |this, anchor, window, cx| {
+                                        let sticky_entries = this.render_sticky_entries(
+                                            anchor,
+                                            has_write_access,
+                                            window,
+                                            cx,
+                                        );
+                                        this.sticky_items_count = sticky_entries.len();
+                                        sticky_entries
+                                    },
+                                )
+                                .with_decoration(
+                                    ui::indent_guides(
+                                        px(TREE_INDENT),
+                                        IndentGuideColors::panel(cx),
+                                    )
                                     .with_left_offset(INDENT_GUIDE_LEFT_OFFSET),
-                            ))
+                                ),
+                            )
                         })
                         .group("entries")
                         .size_full()
