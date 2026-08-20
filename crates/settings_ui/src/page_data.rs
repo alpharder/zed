@@ -6235,21 +6235,48 @@ fn panels_page() -> SettingsPage {
                 metadata: None,
                 files: USER,
             }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Tree View",
-                description: "Enable to show entries in tree view list, disable to show in flat view list.",
-                field: Box::new(SettingField {
-                    organization_override: None,
-                    json_path: Some("git_panel.tree_view"),
-                    pick: |settings_content| {
-                        settings_content.git_panel.as_ref()?.tree_view.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.git_panel.get_or_insert_default().tree_view = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
+            SettingsPageItem::DynamicItem(DynamicItem {
+                discriminant: SettingItem {
+                    title: "Tree View",
+                    description: "Enable to show entries in tree view list, disable to show in flat view list.",
+                    field: Box::new(SettingField {
+                        organization_override: None,
+                        json_path: Some("git_panel.tree_view"),
+                        pick: |settings_content| {
+                            settings_content.git_panel.as_ref()?.tree_view.as_ref()
+                        },
+                        write: |settings_content, value, _| {
+                            settings_content.git_panel.get_or_insert_default().tree_view = value;
+                        },
+                    }),
+                    metadata: None,
+                    files: USER,
+                },
+                pick_discriminant: |settings_content| {
+                    Some(settings_content.git_panel.as_ref()?.tree_view? as usize)
+                },
+                fields: vec![
+                    Vec::new(),
+                    vec![SettingItem {
+                        title: "Sticky Directories",
+                        description: "Whether parent directories stick to the top of the git panel while scrolling in tree view.",
+                        field: Box::new(SettingField {
+                            organization_override: None,
+                            json_path: Some("git_panel.sticky_scroll"),
+                            pick: |settings_content| {
+                                settings_content.git_panel.as_ref()?.sticky_scroll.as_ref()
+                            },
+                            write: |settings_content, value, _| {
+                                settings_content
+                                    .git_panel
+                                    .get_or_insert_default()
+                                    .sticky_scroll = value;
+                            },
+                        }),
+                        metadata: None,
+                        files: USER,
+                    }],
+                ],
             }),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "File Icons",

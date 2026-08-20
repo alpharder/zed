@@ -50,8 +50,8 @@ use gpui::{
     AbsoluteLength, Action, Anchor, AnyElement, AsyncApp, AsyncWindowContext, ClickEvent,
     ClipboardItem, DismissEvent, Empty, Entity, EventEmitter, FocusHandle, Focusable, KeyContext,
     MouseButton, MouseDownEvent, Pixels, Point, PromptLevel, ScrollStrategy, Subscription, Task,
-    TaskExt, TextStyle, UniformListScrollHandle, WeakEntity, actions, anchored, deferred,
-    uniform_list,
+    TaskExt, TextStyle, UniformListScrollHandle, WeakEntity, actions, anchored, deferred, hsla,
+    linear_color_stop, linear_gradient, uniform_list,
 };
 use itertools::Itertools;
 use language::{Buffer, BufferEvent, File};
@@ -91,8 +91,8 @@ use time::OffsetDateTime;
 use ui::{
     ButtonLike, Checkbox, Chip, ContextMenu, ContextMenuEntry, Divider, DocumentationSide,
     ElevationIndex, IndentGuideColors, KeyBinding, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, SplitButton, Tab, TintColor, Tooltip, WithScrollbar,
-    prelude::*,
+    ProjectEmptyState, ScrollAxes, ScrollableHandle, Scrollbars, SplitButton, Tab, TintColor,
+    Tooltip, WithScrollbar, prelude::*,
 };
 use util::paths::PathStyle;
 use util::{ResultExt, TryFutureExt, markdown::MarkdownInlineCode, maybe, rel_path::RelPath};
@@ -155,6 +155,8 @@ actions!(
         ExpandSelectedEntry,
         /// Collapses the selected entry to hide its children.
         CollapseSelectedEntry,
+        /// Toggles sticky directories while scrolling the tree view.
+        ToggleStickyScroll,
         /// View unstaged changes
         ViewUnstagedChanges,
         /// View staged changes
@@ -199,6 +201,7 @@ struct GitPanelViewOptionsMenuState {
     sort_by: GitPanelSortBy,
     group_by: GitPanelGroupBy,
     tree_view: bool,
+    sticky_scroll: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -374,6 +377,7 @@ fn git_panel_view_options_menu(
         sort_by: GitPanelSettings::get_global(cx).sort_by,
         group_by: GitPanelSettings::get_global(cx).group_by,
         tree_view: GitPanelSettings::get_global(cx).tree_view,
+        sticky_scroll: GitPanelSettings::get_global(cx).sticky_scroll,
     }));
 
     ContextMenu::build_persistent(window, cx, move |context_menu, _, _| {
@@ -409,6 +413,20 @@ fn git_panel_view_options_menu(
                             window.dispatch_action(Box::new(ToggleTreeView), cx);
                         }
                     })
+            })
+            .when(state.tree_view, |this| {
+                this.separator().header("Tree").item({
+                    let view_options_menu_state = view_options_menu_state.clone();
+                    ContextMenuEntry::new("Sticky Directories")
+                        .toggle(IconPosition::End, state.sticky_scroll)
+                        .handler(move |window, cx| {
+                            view_options_menu_state.set(GitPanelViewOptionsMenuState {
+                                sticky_scroll: !state.sticky_scroll,
+                                ..state
+                            });
+                            window.dispatch_action(Box::new(ToggleStickyScroll), cx);
+                        })
+                })
             })
             .when(!state.tree_view, |this| {
                 this.separator()
@@ -948,6 +966,18 @@ struct TreeNode {
     files: Vec<GitStatusEntry>,
 }
 
+#[derive(Clone)]
+struct StickyGitPanelCandidate {
+    index: usize,
+    depth: usize,
+}
+
+impl ui::StickyCandidate for StickyGitPanelCandidate {
+    fn depth(&self) -> usize {
+        self.depth
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GitStatusEntry {
     pub(crate) repo_path: RepoPath,
@@ -1063,6 +1093,7 @@ pub struct GitPanel {
     entry_count: usize,
     changes_count: usize,
     diff_stat_total: DiffStat,
+    sticky_items_count: usize,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
     pending_remote_operation: Option<RemoteOperationKind>,
@@ -1230,6 +1261,7 @@ impl GitPanel {
             let mut was_file_icons = GitPanelSettings::get_global(cx).file_icons;
             let mut was_folder_icons = GitPanelSettings::get_global(cx).folder_icons;
             let mut was_diff_stats = GitPanelSettings::get_global(cx).diff_stats;
+            let mut was_sticky_scroll = GitPanelSettings::get_global(cx).sticky_scroll;
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
                 let settings = GitPanelSettings::get_global(cx);
                 let sort_by = settings.sort_by;
@@ -1238,6 +1270,7 @@ impl GitPanel {
                 let file_icons = settings.file_icons;
                 let folder_icons = settings.folder_icons;
                 let diff_stats = settings.diff_stats;
+                let sticky_scroll = settings.sticky_scroll;
                 if tree_view != was_tree_view {
                     match (&mut this.view_mode, tree_view) {
                         (GitPanelViewMode::Tree(state), false) => {
@@ -1263,7 +1296,13 @@ impl GitPanel {
                 if (diff_stats != was_diff_stats) || update_entries {
                     this.update_visible_entries(window, cx);
                 }
-                if file_icons != was_file_icons || folder_icons != was_folder_icons {
+                if !sticky_scroll {
+                    this.sticky_items_count = 0;
+                }
+                if file_icons != was_file_icons
+                    || folder_icons != was_folder_icons
+                    || sticky_scroll != was_sticky_scroll
+                {
                     cx.notify();
                 }
                 was_sort_by = sort_by;
@@ -1272,6 +1311,7 @@ impl GitPanel {
                 was_file_icons = file_icons;
                 was_folder_icons = folder_icons;
                 was_diff_stats = diff_stats;
+                was_sticky_scroll = sticky_scroll;
             })
             .detach();
 
@@ -1364,6 +1404,7 @@ impl GitPanel {
                 new_staged_count: 0,
                 changes_count: 0,
                 diff_stat_total: DiffStat::default(),
+                sticky_items_count: 0,
                 pending_commit: None,
                 pending_remote_operation: None,
                 amend_pending,
@@ -1661,8 +1702,13 @@ impl GitPanel {
         };
 
         if let Some(visible_index) = visible_index {
-            self.scroll_handle
-                .scroll_to_item(visible_index, ScrollStrategy::Center);
+            // Entries in the top rows can be covered by the sticky directory
+            // overlay; offset the visibility check by its height.
+            self.scroll_handle.scroll_to_item_with_offset(
+                visible_index,
+                ScrollStrategy::Center,
+                self.sticky_items_count,
+            );
         }
 
         cx.notify();
@@ -4587,6 +4633,23 @@ impl GitPanel {
         }
     }
 
+    fn toggle_sticky_scroll(
+        &mut self,
+        _: &ToggleStickyScroll,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Read the current value inside the closure so rapid repeated toggles
+        // queue up as sequential negations instead of racing the async write.
+        update_settings_file(self.fs.clone(), cx, |settings, cx| {
+            let git_panel = settings.git_panel.get_or_insert_default();
+            let current = git_panel
+                .sticky_scroll
+                .unwrap_or_else(|| GitPanelSettings::get_global(cx).sticky_scroll);
+            git_panel.sticky_scroll = Some(!current);
+        });
+    }
+
     pub(crate) fn increase_font_size(
         &mut self,
         action: &IncreaseBufferFontSize,
@@ -7343,6 +7406,15 @@ impl GitPanel {
             GitPanelViewMode::Tree(state) => (true, state.logical_indices.len()),
             GitPanelViewMode::Flat => (false, self.visible_flat_entry_indices().len()),
         };
+        let show_sticky_entries = {
+            if GitPanelSettings::get_global(cx).sticky_scroll {
+                let is_scrollable = self.scroll_handle.is_scrollable();
+                let is_scrolled = self.scroll_handle.offset().y < px(0.);
+                is_scrollable && is_scrolled
+            } else {
+                false
+            }
+        };
         let repo = repo.downgrade();
 
         v_flex()
@@ -7408,6 +7480,7 @@ impl GitPanel {
                                                 ix,
                                                 entry,
                                                 has_write_access,
+                                                false,
                                                 window,
                                                 cx,
                                             ));
@@ -7441,6 +7514,51 @@ impl GitPanel {
                                             this.compute_visible_depths(range)
                                         },
                                     ),
+                            )
+                        })
+                        .when(is_tree_view && show_sticky_entries, |list| {
+                            list.with_decoration(
+                                ui::sticky_items(
+                                    cx.entity(),
+                                    |this, range: Range<usize>, _window, _cx| {
+                                        let mut items = SmallVec::new();
+                                        if let Some(state) = this.view_mode.tree_state() {
+                                            for ix in range {
+                                                let Some(&entry_index) =
+                                                    state.logical_indices.get(ix)
+                                                else {
+                                                    continue;
+                                                };
+                                                let Some(entry) = this.entries.get(entry_index)
+                                                else {
+                                                    continue;
+                                                };
+                                                items.push(StickyGitPanelCandidate {
+                                                    index: entry_index,
+                                                    depth: entry.depth(),
+                                                });
+                                            }
+                                        }
+                                        items
+                                    },
+                                    move |this, anchor, window, cx| {
+                                        let sticky_entries = this.render_sticky_entries(
+                                            anchor,
+                                            has_write_access,
+                                            window,
+                                            cx,
+                                        );
+                                        this.sticky_items_count = sticky_entries.len();
+                                        sticky_entries
+                                    },
+                                )
+                                .with_decoration(
+                                    ui::indent_guides(
+                                        px(TREE_INDENT),
+                                        IndentGuideColors::panel(cx),
+                                    )
+                                    .with_left_offset(INDENT_GUIDE_LEFT_OFFSET),
+                                ),
                             )
                         })
                         .group("entries")
@@ -8021,11 +8139,94 @@ impl GitPanel {
             .into_any_element()
     }
 
+    fn render_sticky_entries(
+        &self,
+        anchor: StickyGitPanelCandidate,
+        has_write_access: bool,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> SmallVec<[AnyElement; 8]> {
+        let Some(anchor_entry) = self.entries.get(anchor.index) else {
+            return SmallVec::new();
+        };
+        if matches!(
+            anchor_entry,
+            GitListEntry::Header(_) | GitListEntry::EmptySection(_)
+        ) {
+            return SmallVec::new();
+        }
+
+        // `entries` is a pre-order flattening that includes hidden rows, so the
+        // ancestor chain is found by decreasing depth; a section header
+        // terminates it.
+        let mut parents: Vec<(usize, &GitTreeDirEntry)> = Vec::new();
+        let mut want_depth = anchor_entry.depth();
+        for index in (0..anchor.index).rev() {
+            if want_depth == 0 {
+                break;
+            }
+            match self.entries.get(index) {
+                Some(GitListEntry::Directory(directory)) if directory.depth < want_depth => {
+                    want_depth = directory.depth;
+                    parents.push((index, directory));
+                }
+                Some(GitListEntry::Header(_)) => break,
+                _ => {}
+            }
+        }
+
+        if parents.is_empty() {
+            return SmallVec::new();
+        }
+        parents.reverse();
+
+        let last_item_index = parents.len() - 1;
+        parents
+            .into_iter()
+            .enumerate()
+            .map(|(position, (index, directory))| {
+                div()
+                    .w_full()
+                    .h(self.list_item_height())
+                    .relative()
+                    .block_mouse_except_scroll()
+                    .bg(cx.theme().colors().panel_overlay_background)
+                    .child(self.render_directory_entry(
+                        index,
+                        directory,
+                        has_write_access,
+                        true,
+                        window,
+                        cx,
+                    ))
+                    .when(position == last_item_index, |this| {
+                        let shadow_color_top = hsla(0.0, 0.0, 0.0, 0.1);
+                        let shadow_color_bottom = hsla(0.0, 0.0, 0.0, 0.);
+                        this.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .bottom_neg_1p5()
+                                .h_1p5()
+                                .w_full()
+                                .bg(linear_gradient(
+                                    0.,
+                                    linear_color_stop(shadow_color_top, 1.),
+                                    linear_color_stop(shadow_color_bottom, 0.),
+                                )),
+                        )
+                    })
+                    .into_any_element()
+            })
+            .collect()
+    }
+
     fn render_directory_entry(
         &self,
         ix: usize,
         entry: &GitTreeDirEntry,
         has_write_access: bool,
+        sticky: bool,
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -8033,11 +8234,21 @@ impl GitPanel {
         let selected = self.selected_entry == Some(ix);
         let label_color = Color::Muted;
 
-        let id: ElementId = ElementId::Name(format!("dir_{}_{}", entry.name, ix).into());
-        let checkbox_id: ElementId =
-            ElementId::Name(format!("dir_checkbox_{}_{}", entry.name, ix).into());
-        let checkbox_wrapper_id: ElementId =
-            ElementId::Name(format!("dir_checkbox_wrapper_{}_{}", entry.name, ix).into());
+        // Sticky rows duplicate directory rows that may be visible in the list
+        // at the same time; their element ids must not collide.
+        let (id, checkbox_id, checkbox_wrapper_id): (ElementId, ElementId, ElementId) = if sticky {
+            (
+                ("sticky_dir", ix).into(),
+                ("sticky_dir_checkbox", ix).into(),
+                ("sticky_dir_checkbox_wrapper", ix).into(),
+            )
+        } else {
+            (
+                ("dir", ix).into(),
+                ("dir_checkbox", ix).into(),
+                ("dir_checkbox_wrapper", ix).into(),
+            )
+        };
 
         let selected_bg_alpha = 0.08;
         let state_opacity_step = 0.04;
@@ -8551,6 +8762,7 @@ impl Render for GitPanel {
             .on_action(cx.listener(Self::set_group_by_status))
             .on_action(cx.listener(Self::set_group_by_staging))
             .on_action(cx.listener(Self::toggle_tree_view))
+            .on_action(cx.listener(Self::toggle_sticky_scroll))
             .on_action(cx.listener(Self::increase_font_size))
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))

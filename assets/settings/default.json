@@ -1036,6 +1036,11 @@
     ///
     /// Default: false
     "tree_view": false,
+    // Whether parent directories stick to the top of the git panel
+    // while scrolling in tree view.
+    //
+    // Default: false
+    "sticky_scroll": false,
     // Whether the git panel should open on startup.
     //
     // Default: false
