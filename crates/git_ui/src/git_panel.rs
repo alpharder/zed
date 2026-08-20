@@ -1352,7 +1352,8 @@ impl GitPanel {
             let mut was_folder_icons = GitPanelSettings::get_global(cx).folder_icons;
             let mut was_diff_stats = GitPanelSettings::get_global(cx).diff_stats;
             let mut was_sticky_scroll = GitPanelSettings::get_global(cx).sticky_scroll;
-            let mut was_directory_diff_stats = GitPanelSettings::get_global(cx).directory_diff_stats;
+            let mut was_directory_diff_stats =
+                GitPanelSettings::get_global(cx).directory_diff_stats;
             cx.observe_global_in::<SettingsStore>(window, move |this, window, cx| {
                 let settings = GitPanelSettings::get_global(cx);
                 let sort_by = settings.sort_by;
@@ -2325,9 +2326,7 @@ impl GitPanel {
                         .project_path_to_repo_path(&project_path, cx)
                         .as_ref()
             {
-                if !allow_preview
-                    && let Some(pane) = workspace.read(cx).pane_for(&project_diff)
-                {
+                if !allow_preview && let Some(pane) = workspace.read(cx).pane_for(&project_diff) {
                     pane.update(cx, |pane, _| {
                         pane.unpreview_item_if_preview(project_diff.entity_id());
                     });
@@ -2405,7 +2404,7 @@ impl GitPanel {
                 window,
                 cx,
             )
-                .detach_and_notify_err(self.workspace.clone(), window, cx);
+            .detach_and_notify_err(self.workspace.clone(), window, cx);
 
             Some(())
         });
@@ -5943,18 +5942,18 @@ impl GitPanel {
                         else {
                             return context_menu;
                         };
-                        let toggle = |panel: &WeakEntity<GitPanel>,
-                                      apply: fn(&mut GitStatusFilter)| {
-                            let panel = panel.clone();
-                            move |window: &mut Window, cx: &mut App| {
-                                panel
-                                    .update(cx, |panel, cx| {
-                                        apply(&mut panel.status_filter);
-                                        panel.update_visible_entries(window, cx);
-                                    })
-                                    .ok();
-                            }
-                        };
+                        let toggle =
+                            |panel: &WeakEntity<GitPanel>, apply: fn(&mut GitStatusFilter)| {
+                                let panel = panel.clone();
+                                move |window: &mut Window, cx: &mut App| {
+                                    panel
+                                        .update(cx, |panel, cx| {
+                                            apply(&mut panel.status_filter);
+                                            panel.update_visible_entries(window, cx);
+                                        })
+                                        .ok();
+                                }
+                            };
                         context_menu
                             .header("Display")
                             .toggleable_entry(
@@ -5978,9 +5977,7 @@ impl GitPanel {
                                 filter.show_deleted,
                                 IconPosition::End,
                                 None,
-                                toggle(&panel, |filter| {
-                                    filter.show_deleted = !filter.show_deleted
-                                }),
+                                toggle(&panel, |filter| filter.show_deleted = !filter.show_deleted),
                             )
                     },
                 ))
@@ -6419,10 +6416,9 @@ impl GitPanel {
                     h_flex()
                         .gap_1()
                         .when(GitPanelSettings::get_global(cx).tree_view, |this| {
-                            let any_expanded =
-                                self.view_mode.tree_state().is_some_and(|state| {
-                                    state.expanded_dirs.values().any(|expanded| *expanded)
-                                });
+                            let any_expanded = self.view_mode.tree_state().is_some_and(|state| {
+                                state.expanded_dirs.values().any(|expanded| *expanded)
+                            });
                             let (id, icon, label, action): (_, _, _, Box<dyn Action>) =
                                 if any_expanded {
                                     (
@@ -7884,42 +7880,49 @@ impl GitPanel {
                             )
                         })
                         .when(is_tree_view && show_sticky_entries, |list| {
-                            list.with_decoration(ui::sticky_items(
-                                cx.entity(),
-                                |this, range: Range<usize>, _window, _cx| {
-                                    let mut items = SmallVec::new();
-                                    if let Some(state) = this.view_mode.tree_state() {
-                                        for ix in range {
-                                            let Some(&entry_index) = state.logical_indices.get(ix)
-                                            else {
-                                                continue;
-                                            };
-                                            let Some(entry) = this.entries.get(entry_index) else {
-                                                continue;
-                                            };
-                                            items.push(StickyGitPanelCandidate {
-                                                index: entry_index,
-                                                depth: entry.depth(),
-                                            });
+                            list.with_decoration(
+                                ui::sticky_items(
+                                    cx.entity(),
+                                    |this, range: Range<usize>, _window, _cx| {
+                                        let mut items = SmallVec::new();
+                                        if let Some(state) = this.view_mode.tree_state() {
+                                            for ix in range {
+                                                let Some(&entry_index) =
+                                                    state.logical_indices.get(ix)
+                                                else {
+                                                    continue;
+                                                };
+                                                let Some(entry) = this.entries.get(entry_index)
+                                                else {
+                                                    continue;
+                                                };
+                                                items.push(StickyGitPanelCandidate {
+                                                    index: entry_index,
+                                                    depth: entry.depth(),
+                                                });
+                                            }
                                         }
-                                    }
-                                    items
-                                },
-                                move |this, anchor, window, cx| {
-                                    let sticky_entries = this.render_sticky_entries(
-                                        anchor,
-                                        has_write_access,
-                                        window,
-                                        cx,
-                                    );
-                                    this.sticky_items_count = sticky_entries.len();
-                                    sticky_entries
-                                },
-                            )
-                            .with_decoration(
-                                ui::indent_guides(px(TREE_INDENT), IndentGuideColors::panel(cx))
+                                        items
+                                    },
+                                    move |this, anchor, window, cx| {
+                                        let sticky_entries = this.render_sticky_entries(
+                                            anchor,
+                                            has_write_access,
+                                            window,
+                                            cx,
+                                        );
+                                        this.sticky_items_count = sticky_entries.len();
+                                        sticky_entries
+                                    },
+                                )
+                                .with_decoration(
+                                    ui::indent_guides(
+                                        px(TREE_INDENT),
+                                        IndentGuideColors::panel(cx),
+                                    )
                                     .with_left_offset(INDENT_GUIDE_LEFT_OFFSET),
-                            ))
+                                ),
+                            )
                         })
                         .group("entries")
                         .size_full()
