@@ -842,6 +842,7 @@ pub enum GitPanelSortBy {
     #[default]
     Path,
     Name,
+    LinesChanged,
 }
 
 #[derive(

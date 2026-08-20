@@ -144,6 +144,8 @@ actions!(
         SetSortByPath,
         /// Sorts entries by name.
         SetSortByName,
+        /// Sorts entries by the number of changed lines.
+        SetSortByLinesChanged,
         /// Disables grouping entries by status.
         SetGroupByNone,
         /// Groups entries by status.
@@ -521,6 +523,23 @@ fn git_panel_view_options_menu(
                                         ..state
                                     });
                                     window.dispatch_action(Box::new(SetSortByName), cx);
+                                }
+                            })
+                    })
+                    .item({
+                        let view_options_menu_state = view_options_menu_state.clone();
+                        ContextMenuEntry::new("Lines Changed")
+                            .toggle(
+                                IconPosition::End,
+                                state.sort_by == GitPanelSortBy::LinesChanged,
+                            )
+                            .handler(move |window, cx| {
+                                if !state.tree_view {
+                                    view_options_menu_state.set(GitPanelViewOptionsMenuState {
+                                        sort_by: GitPanelSortBy::LinesChanged,
+                                        ..state
+                                    });
+                                    window.dispatch_action(Box::new(SetSortByLinesChanged), cx);
                                 }
                             })
                     })
@@ -4741,6 +4760,24 @@ impl GitPanel {
         }
     }
 
+    fn set_sort_by_lines_changed(
+        &mut self,
+        _: &SetSortByLinesChanged,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            let workspace = workspace.read(cx);
+            let fs = workspace.app_state().fs.clone();
+            cx.update_global::<SettingsStore, _>(|store, _cx| {
+                store.update_settings_file(fs, move |settings, _cx| {
+                    settings.git_panel.get_or_insert_default().sort_by =
+                        Some(GitPanelSortBy::LinesChanged);
+                });
+            });
+        }
+    }
+
     fn set_group_by_none(&mut self, _: &SetGroupByNone, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = self.workspace.upgrade() {
             let workspace = workspace.read(cx);
@@ -5306,6 +5343,18 @@ impl GitPanel {
                     a.repo_path
                         .file_name()
                         .cmp(&b.repo_path.file_name())
+                        .then_with(|| a.repo_path.cmp(&b.repo_path))
+                }),
+                GitPanelSortBy::LinesChanged => entries.sort_by(|a, b| {
+                    // Entries whose diff stats have not loaded yet sort as
+                    // zero; a later status refresh re-sorts them into place.
+                    let lines_changed = |entry: &GitStatusEntry| {
+                        entry
+                            .diff_stat
+                            .map_or(0u64, |stat| u64::from(stat.added) + u64::from(stat.deleted))
+                    };
+                    lines_changed(b)
+                        .cmp(&lines_changed(a))
                         .then_with(|| a.repo_path.cmp(&b.repo_path))
                 }),
             };
@@ -9143,6 +9192,7 @@ impl Render for GitPanel {
             })
             .on_action(cx.listener(Self::set_sort_by_path))
             .on_action(cx.listener(Self::set_sort_by_name))
+            .on_action(cx.listener(Self::set_sort_by_lines_changed))
             .on_action(cx.listener(Self::set_group_by_none))
             .on_action(cx.listener(Self::set_group_by_status))
             .on_action(cx.listener(Self::set_group_by_staging))
@@ -10087,6 +10137,85 @@ mod tests {
         panel.read_with(cx, |panel, _| {
             assert!(!panel.status_filter.is_active());
             assert_eq!(status_paths(panel).len(), 3);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_sort_by_lines_changed(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "a_small.rs": "one changed\n",
+                "b_large.rs": "one changed\ntwo changed\nthree changed\nfour changed\nfive changed\n",
+                "c_medium.rs": "one changed\ntwo changed\nthree changed\n",
+            }),
+        )
+        .await;
+
+        let head = [
+            ("a_small.rs", "one\n".to_string()),
+            ("b_large.rs", "one\ntwo\nthree\nfour\nfive\n".to_string()),
+            ("c_medium.rs", "one\ntwo\nthree\n".to_string()),
+        ];
+        fs.set_head_for_repo(Path::new(path!("/project/.git")), &head, "deadbeef");
+        fs.set_index_for_repo(Path::new(path!("/project/.git")), &head);
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+
+        cx.executor().run_until_parked();
+
+        cx.update(|_window, cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.git_panel.get_or_insert_default().sort_by =
+                        Some(GitPanelSortBy::LinesChanged);
+                })
+            });
+        });
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+        await_git_panel_entries(&panel, cx).await;
+        cx.executor().run_until_parked();
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            let status_paths = panel
+                .entries
+                .iter()
+                .filter_map(|entry| entry.status_entry().map(|status| status.repo_path.clone()))
+                .collect::<Vec<_>>();
+            // Descending by added+deleted lines: 5, 3, 1.
+            assert_eq!(
+                status_paths,
+                vec![
+                    repo_path("b_large.rs"),
+                    repo_path("c_medium.rs"),
+                    repo_path("a_small.rs"),
+                ]
+            );
         });
     }
 

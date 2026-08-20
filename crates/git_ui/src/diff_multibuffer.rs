@@ -996,6 +996,10 @@ fn project_diff_sort_path(
         match sort_by {
             GitPanelSortBy::Path => repo_path.into_arc(),
             GitPanelSortBy::Name => name_sort_path(repo_path),
+            // Sort keys double as stable excerpt identities, so they cannot
+            // encode volatile diff stats; the multibuffer keeps path order for
+            // this mode.
+            GitPanelSortBy::LinesChanged => repo_path.into_arc(),
         }
     }
 }

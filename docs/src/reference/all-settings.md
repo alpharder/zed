@@ -5700,7 +5700,7 @@ See the [debugger page](../debugger.md) for more information about debugging sup
 - `default_width`: Default width of the git panel
 - `status_style`: How to display git status. Can be `label_color` or `icon`
 - `fallback_branch_name`: What branch name to use if `init.defaultBranch` is not set
-- `sort_by`: How to sort entries in the git panel. Can be `path` or `name`
+- `sort_by`: How to sort entries in the git panel. Can be `path`, `name`, or `lines_changed`
 - `group_by`: How to group entries in the git panel. Can be `none` or `status`
 - `collapse_untracked_diff`: Whether to collapse untracked files in the diff panel
 - `scrollbar`: When to show the scrollbar in the git panel
