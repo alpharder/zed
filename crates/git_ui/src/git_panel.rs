@@ -6117,10 +6117,9 @@ impl GitPanel {
                     h_flex()
                         .gap_1()
                         .when(GitPanelSettings::get_global(cx).tree_view, |this| {
-                            let any_expanded =
-                                self.view_mode.tree_state().is_some_and(|state| {
-                                    state.expanded_dirs.values().any(|expanded| *expanded)
-                                });
+                            let any_expanded = self.view_mode.tree_state().is_some_and(|state| {
+                                state.expanded_dirs.values().any(|expanded| *expanded)
+                            });
                             let (id, icon, label, action): (_, _, _, Box<dyn Action>) =
                                 if any_expanded {
                                     (
