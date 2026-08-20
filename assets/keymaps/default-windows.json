@@ -1020,6 +1020,8 @@
       "down": "git_panel::NextEntry",
       "left": "git_panel::CollapseSelectedEntry",
       "right": "git_panel::ExpandSelectedEntry",
+      "ctrl-left": "git_panel::CollapseAllEntries",
+      "ctrl-right": "git_panel::ExpandAllEntries",
       "enter": "menu::Confirm",
       "alt-y": "git::StageFile",
       "shift-alt-y": "git::UnstageFile",
