@@ -1441,6 +1441,7 @@
       "cmd-up": "markdown::ScrollToTop",
       "cmd-down": "markdown::ScrollToBottom",
       "cmd-shift-v": "markdown::CloseAndReturnToEditor",
+      "cmd-shift-o": "outline::Toggle",
       "cmd-f": "buffer_search::Deploy",
     },
   },

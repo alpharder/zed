@@ -225,6 +225,19 @@ impl OutlineViewDelegate {
         }
     }
 
+    /// The outline can be opened from an item that only acts as an editor, such as the markdown
+    /// preview; focus goes back to that item rather than to the editor it wraps.
+    fn navigation_focus_handle(&self, cx: &App) -> FocusHandle {
+        let editor = &self.active_editor;
+        editor
+            .read(cx)
+            .workspace()
+            .and_then(|workspace| workspace.read(cx).active_item(cx))
+            .filter(|item| item.act_as::<Editor>(cx).as_ref() == Some(editor))
+            .map(|item| item.item_focus_handle(cx))
+            .unwrap_or_else(|| editor.focus_handle(cx))
+    }
+
     fn restore_active_editor(&mut self, window: &mut Window, cx: &mut App) {
         self.active_editor.update(cx, |editor, cx| {
             editor.clear_row_highlights::<OutlineRowHighlights>();
@@ -412,7 +425,7 @@ impl PickerDelegate for OutlineViewDelegate {
         self.prev_scroll_position.take();
         self.set_selected_index(self.selected_match_index, true, cx);
 
-        self.active_editor.update(cx, |active_editor, cx| {
+        let navigated = self.active_editor.update(cx, |active_editor, cx| {
             let highlight = active_editor
                 .highlighted_rows::<OutlineRowHighlights>(cx)
                 .next();
@@ -424,9 +437,14 @@ impl PickerDelegate for OutlineViewDelegate {
                     |s| s.select_ranges([rows.start..rows.start]),
                 );
                 active_editor.clear_row_highlights::<OutlineRowHighlights>();
-                window.focus(&active_editor.focus_handle(cx), cx);
+                true
+            } else {
+                false
             }
         });
+        if navigated {
+            window.focus(&self.navigation_focus_handle(cx), cx);
+        }
 
         self.dismissed(window, cx);
     }

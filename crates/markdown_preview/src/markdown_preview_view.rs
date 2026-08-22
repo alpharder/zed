@@ -7,10 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use editor::display_map::DisplaySnapshot;
 use editor::items::open_resolved_target;
 use editor::scroll::Autoscroll;
 use editor::{
-    Editor, EditorEvent, EditorSettingsScrollbarProxy, MultiBufferOffset, SelectionEffects,
+    DisplayPoint, Editor, EditorEvent, EditorSettingsScrollbarProxy, MultiBufferOffset,
+    SelectionEffects, ToOffset,
 };
 use gpui::{
     App, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable, ImageSource,
@@ -71,6 +73,16 @@ pub struct MarkdownPreviewView {
     /// Search results depend on the parsed markdown, which lags behind the source while a
     /// background parse is in flight. Tracked so matches can be invalidated once it lands.
     markdown_parse_pending: bool,
+    /// The cursor position the preview itself requested (a click in the rendered text), so the
+    /// resulting selection change does not scroll the preview back to the clicked block.
+    /// Selection changes coming from anywhere else (typing, the outline panel, the outline
+    /// modal) reveal the new position. Kept as a position rather than a flag because the editor
+    /// emits no event when the selection does not actually change.
+    own_selection_change: Option<usize>,
+    /// The source position the editor was last asked to reveal through a row highlight (the
+    /// outline modal or go-to-line peeking at a target). Remembered so the preview follows each
+    /// new peek exactly once.
+    peeked_source_index: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,7 +111,7 @@ impl MarkdownPreviewMode {
 
 struct EditorState {
     editor: Entity<Editor>,
-    _subscription: Subscription,
+    _subscriptions: [Subscription; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -330,6 +342,8 @@ impl MarkdownPreviewView {
                 hovered_url: None,
                 mode,
                 markdown_parse_pending: false,
+                own_selection_change: None,
+                peeked_source_index: None,
             };
 
             this.set_editor(active_editor, window, cx);
@@ -459,18 +473,11 @@ impl MarkdownPreviewView {
                         cx.emit(MarkdownPreviewEvent::SourceFileHandleChanged);
                     }
                     EditorEvent::SelectionsChanged { .. } => {
-                        let (selection_start, editor_is_focused) =
-                            editor.update(cx, |editor, cx| {
-                                let index = Self::selected_source_index(editor, cx);
-                                let focused = editor.focus_handle(cx).is_focused(window);
-                                (index, focused)
-                            });
+                        let selection_start =
+                            editor.update(cx, |editor, cx| Self::selected_source_index(editor, cx));
+                        let reveal = this.own_selection_change.take() != selection_start;
                         if let Some(selection_start) = selection_start {
-                            this.sync_preview_to_source_index(
-                                selection_start,
-                                editor_is_focused,
-                                cx,
-                            );
+                            this.sync_preview_to_source_index(selection_start, reveal, cx);
                             cx.notify();
                         }
                     }
@@ -479,11 +486,33 @@ impl MarkdownPreviewView {
             },
         );
 
+        // Peeking does not move the cursor, and a hidden editor never autoscrolls, so the
+        // highlight itself is polled whenever the editor changes.
+        let peek_subscription = cx.observe(&editor, |this, editor, cx| {
+            if this.peeked_source_index.is_none()
+                && !editor.read(cx).has_highlighted_rows_for_autoscroll()
+            {
+                return;
+            }
+            let peeked_source_index =
+                editor.update(cx, |editor, cx| Self::peeked_source_index(editor, cx));
+            if peeked_source_index != this.peeked_source_index {
+                this.peeked_source_index = peeked_source_index;
+                if let Some(source_index) = peeked_source_index {
+                    this.markdown.update(cx, |markdown, cx| {
+                        markdown.request_autoscroll_to_source_index(source_index, cx);
+                    });
+                    cx.notify();
+                }
+            }
+        });
+
         self.base_directory = Self::get_folder_for_active_editor(editor.read(cx), cx);
         self.hovered_url = None;
+        self.peeked_source_index = None;
         self.active_editor = Some(EditorState {
             editor,
-            _subscription: subscription,
+            _subscriptions: [subscription, peek_subscription],
         });
         self.update_markdown_from_active_editor(false, true, window, cx);
         if had_active_editor {
@@ -613,17 +642,28 @@ impl MarkdownPreviewView {
             .last::<MultiBufferOffset>(&display_snapshot)
             .range()
             .start;
+        Self::source_index_for_offset(editor, &display_snapshot, source_offset, cx)
+    }
+
+    fn peeked_source_index(editor: &Editor, cx: &mut App) -> Option<usize> {
+        let display_snapshot = editor.display_snapshot(cx);
+        let row = editor.highlighted_display_row_for_autoscroll(&display_snapshot)?;
+        let source_point = DisplayPoint::new(row, 0).to_point(&display_snapshot);
+        Self::source_index_for_offset(editor, &display_snapshot, source_point, cx)
+    }
+
+    fn source_index_for_offset(
+        editor: &Editor,
+        display_snapshot: &DisplaySnapshot,
+        offset: impl ToOffset,
+        cx: &App,
+    ) -> Option<usize> {
         let buffer = editor.buffer().read(cx).as_singleton()?;
         let buffer_id = buffer.read(cx).remote_id();
         let (buffer_snapshot, buffer_offset) = display_snapshot
             .buffer_snapshot()
-            .point_to_buffer_offset(source_offset)?;
-
-        if buffer_snapshot.remote_id() == buffer_id {
-            Some(buffer_offset.0)
-        } else {
-            None
-        }
+            .point_to_buffer_offset(offset)?;
+        (buffer_snapshot.remote_id() == buffer_id).then_some(buffer_offset.0)
     }
 
     fn sync_preview_to_source_index(
@@ -685,6 +725,24 @@ impl MarkdownPreviewView {
                 Self::change_selection_to_source_index(&editor, source_index, false, window, cx);
                 self.sync_preview_to_source_index(source_index, true, cx);
             }
+        }
+    }
+
+    fn toggle_outline(
+        &mut self,
+        _: &zed_actions::outline::ToggleOutline,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self
+            .active_editor
+            .as_ref()
+            .map(|state| state.editor.clone())
+        else {
+            return;
+        };
+        if let Some(toggle_outline) = zed_actions::outline::TOGGLE_OUTLINE.get() {
+            toggle_outline(editor.into(), window, cx);
         }
     }
 
@@ -1034,9 +1092,13 @@ impl MarkdownPreviewView {
         if let Some(active_editor) = active_editor {
             let editor_for_checkbox = active_editor.clone();
             let view_handle = cx.entity().downgrade();
+            let view_for_source_click = view_handle.clone();
             markdown_element = markdown_element
                 .on_source_click(move |source_index, click_count, window, cx| {
                     if click_count == 1 {
+                        view_for_source_click
+                            .update(cx, |this, _| this.own_selection_change = Some(source_index))
+                            .log_err();
                         Self::change_selection_to_source_index(
                             &active_editor,
                             source_index,
@@ -1664,6 +1726,7 @@ impl Render for MarkdownPreviewView {
             .on_action(cx.listener(MarkdownPreviewView::scroll_to_top))
             .on_action(cx.listener(MarkdownPreviewView::scroll_to_bottom))
             .on_action(cx.listener(MarkdownPreviewView::close_and_return_to_editor))
+            .on_action(cx.listener(MarkdownPreviewView::toggle_outline))
             .on_action(cx.listener(MarkdownPreviewView::increase_font_size))
             .on_action(cx.listener(MarkdownPreviewView::decrease_font_size))
             .on_action(cx.listener(MarkdownPreviewView::reset_font_size))
@@ -2092,10 +2155,11 @@ mod tests {
     use crate::markdown_preview_view::resolve_preview_image;
     use crate::markdown_preview_view::resolve_project_path_for_preview_image;
     use buffer_diff::BufferDiff;
-    use editor::Editor;
+    use editor::{Editor, SelectionEffects};
     use fs::FakeFs;
     use gpui::{
-        App, AppContext as _, Entity, Focusable as _, Modifiers, TestAppContext, WindowHandle, px,
+        App, AppContext as _, Entity, Focusable as _, Modifiers, Pixels, TestAppContext, Window,
+        WindowHandle, px,
     };
     use language::{Buffer, DiskState, Point};
     use project::{Project, ProjectPath};
@@ -3392,12 +3456,210 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    async fn preview_follows_selection_changes_that_do_not_focus_the_editor(
+        cx: &mut TestAppContext,
+    ) {
+        let (multi_workspace, editor) =
+            open_markdown_file(cx, "notes.md", &document_with_distant_heading()).await;
+        let preview = open_preview_for_active_editor(cx, &multi_workspace);
+        cx.run_until_parked();
+        assert_eq!(preview_scroll_offset_y(cx, &preview), px(0.));
+
+        // The outline panel moves the cursor without taking focus away from the preview.
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                assert!(preview.read(cx).focus_handle.contains_focused(window, cx));
+                select_row(&editor, DISTANT_HEADING_ROW, window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        assert!(
+            preview_scroll_offset_y(cx, &preview) < px(0.),
+            "the preview should reveal a cursor moved by another view"
+        );
+    }
+
+    #[gpui::test]
+    async fn preview_does_not_reveal_the_selection_change_it_requested(cx: &mut TestAppContext) {
+        let (multi_workspace, editor) =
+            open_markdown_file(cx, "notes.md", &document_with_distant_heading()).await;
+        let preview = open_preview_for_active_editor(cx, &multi_workspace);
+        cx.run_until_parked();
+
+        // A click on the block the cursor is already in changes nothing, so the editor emits no
+        // event; the remembered request must not swallow the next real navigation.
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                preview.update(cx, |preview, _| preview.own_selection_change = Some(0));
+                MarkdownPreviewView::change_selection_to_source_index(
+                    &editor, 0, false, window, cx,
+                );
+                select_row(&editor, DISTANT_HEADING_ROW, window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let revealed_offset = preview_scroll_offset_y(cx, &preview);
+        assert!(
+            revealed_offset < px(0.),
+            "a stale preview request must not suppress an external navigation"
+        );
+
+        // A click in the rendered text moves the cursor but must leave the scroll position alone.
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                preview.update(cx, |preview, _| preview.own_selection_change = Some(0));
+                MarkdownPreviewView::change_selection_to_source_index(
+                    &editor, 0, false, window, cx,
+                );
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        assert_eq!(cursor_head(cx, &multi_workspace, &editor), Point::new(0, 0));
+        assert_eq!(
+            preview_scroll_offset_y(cx, &preview),
+            revealed_offset,
+            "a click in the preview must not scroll the preview"
+        );
+        preview.read_with(cx, |preview, _| {
+            assert_eq!(preview.own_selection_change, None)
+        });
+    }
+
+    #[gpui::test]
+    async fn outline_modal_navigates_the_preview_and_returns_focus_to_it(cx: &mut TestAppContext) {
+        let (multi_workspace, editor) =
+            open_markdown_file_with_outline(cx, "notes.md", &document_with_distant_heading()).await;
+        cx.update(|cx| outline::init(cx));
+        // Side by side, so stealing focus would move it to the editor's pane.
+        let preview = open_preview_to_the_side(cx, &multi_workspace, &editor);
+        cx.run_until_parked();
+        let workspace = multi_workspace
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .unwrap();
+
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                assert!(preview.read(cx).focus_handle.contains_focused(window, cx));
+                window.dispatch_action(Box::new(zed_actions::outline::ToggleOutline), cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(
+            workspace.read_with(cx, |workspace, cx| {
+                workspace.active_modal::<outline::OutlineView>(cx).is_some()
+            }),
+            "the outline modal should open for the preview's source editor"
+        );
+
+        // Moving through the list peeks at the heading without moving the cursor.
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                window.dispatch_action(Box::new(menu::SelectLast), cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(
+            preview_scroll_offset_y(cx, &preview) < px(0.),
+            "the preview should follow the outline modal peeking at a heading"
+        );
+
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                window.dispatch_action(Box::new(menu::Confirm), cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        assert!(workspace.read_with(cx, |workspace, cx| {
+            workspace.active_modal::<outline::OutlineView>(cx).is_none()
+        }));
+        assert_eq!(
+            cursor_head(cx, &multi_workspace, &editor),
+            Point::new(DISTANT_HEADING_ROW, 0)
+        );
+        assert!(preview_scroll_offset_y(cx, &preview) < px(0.));
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                assert!(
+                    preview.read(cx).focus_handle.is_focused(window),
+                    "confirming in the outline modal must return focus to the preview"
+                );
+            })
+            .unwrap();
+    }
+
+    const DISTANT_HEADING_ROW: u32 = 204;
+
+    fn document_with_distant_heading() -> String {
+        let mut text = String::from("# Intro\n\nintro\n\n");
+        for _ in 0..100 {
+            text.push_str("filler line\n\n");
+        }
+        text.push_str("## Target Section\n\nfound it\n");
+        text
+    }
+
+    fn select_row(editor: &Entity<Editor>, row: u32, window: &mut Window, cx: &mut App) {
+        editor.update(cx, |editor, cx| {
+            editor.change_selections(SelectionEffects::no_scroll(), window, cx, |selections| {
+                selections.select_ranges([Point::new(row, 0)..Point::new(row, 0)])
+            });
+        });
+    }
+
+    fn preview_scroll_offset_y(
+        cx: &mut TestAppContext,
+        preview: &Entity<MarkdownPreviewView>,
+    ) -> Pixels {
+        preview.read_with(cx, |preview, _| preview.scroll_handle.offset().y)
+    }
+
+    fn cursor_head(
+        cx: &mut TestAppContext,
+        multi_workspace: &WindowHandle<MultiWorkspace>,
+        editor: &Entity<Editor>,
+    ) -> Point {
+        multi_workspace
+            .update(cx, |_, window, cx| {
+                editor.update(cx, |editor, cx| {
+                    let snapshot = editor.snapshot(window, cx);
+                    editor.selections.newest::<Point>(&snapshot).head()
+                })
+            })
+            .unwrap()
+    }
+
     async fn open_markdown_file(
         cx: &mut TestAppContext,
         file_name: &str,
         contents: &str,
     ) -> (WindowHandle<MultiWorkspace>, Entity<Editor>) {
+        open_markdown_file_with_languages(cx, file_name, contents, Vec::new()).await
+    }
+
+    /// Registers the real Markdown grammar so the buffer has an outline.
+    async fn open_markdown_file_with_outline(
+        cx: &mut TestAppContext,
+        file_name: &str,
+        contents: &str,
+    ) -> (WindowHandle<MultiWorkspace>, Entity<Editor>) {
+        open_markdown_file_with_languages(cx, file_name, contents, vec![language::markdown_lang()])
+            .await
+    }
+
+    async fn open_markdown_file_with_languages(
+        cx: &mut TestAppContext,
+        file_name: &str,
+        contents: &str,
+        languages: Vec<Arc<language::Language>>,
+    ) -> (WindowHandle<MultiWorkspace>, Entity<Editor>) {
         let app_state = init_test(cx);
+        for language in languages {
+            app_state.languages.add(language);
+        }
         let mut entries = serde_json::Map::new();
         entries.insert(file_name.to_string(), json!(contents));
         app_state
@@ -3444,6 +3706,35 @@ mod tests {
                     workspace.active_pane().update(cx, |pane, cx| {
                         pane.add_item(Box::new(preview.clone()), true, true, None, window, cx)
                     });
+                    preview
+                })
+            })
+            .unwrap()
+    }
+
+    fn open_preview_to_the_side(
+        cx: &mut TestAppContext,
+        multi_workspace: &WindowHandle<MultiWorkspace>,
+        editor: &Entity<Editor>,
+    ) -> Entity<MarkdownPreviewView> {
+        multi_workspace
+            .update(cx, |multi_workspace, window, cx| {
+                let workspace = multi_workspace.workspace().clone();
+                workspace.update(cx, |workspace, cx| {
+                    let origin_pane = workspace.active_pane().clone();
+                    MarkdownPreviewView::open_preview_to_the_side_of_pane(
+                        workspace,
+                        editor.clone(),
+                        origin_pane,
+                        window,
+                        cx,
+                    );
+                    let preview = workspace
+                        .items_of_type::<MarkdownPreviewView>(cx)
+                        .next()
+                        .expect("the preview should open in the adjacent pane");
+                    let focus_handle = preview.read(cx).focus_handle.clone();
+                    focus_handle.focus(window, cx);
                     preview
                 })
             })

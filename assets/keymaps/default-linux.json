@@ -1355,6 +1355,7 @@
       "ctrl-home": "markdown::ScrollToTop",
       "ctrl-end": "markdown::ScrollToBottom",
       "ctrl-shift-v": "markdown::CloseAndReturnToEditor",
+      "ctrl-shift-o": "outline::Toggle",
       "find": "buffer_search::Deploy",
       "ctrl-f": "buffer_search::Deploy",
     },

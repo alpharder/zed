@@ -9111,6 +9111,13 @@ impl Editor {
             )
     }
 
+    pub fn has_highlighted_rows_for_autoscroll(&self) -> bool {
+        self.highlighted_rows
+            .values()
+            .flatten()
+            .any(|highlight| highlight.options.autoscroll)
+    }
+
     pub fn highlighted_display_row_for_autoscroll(
         &self,
         snapshot: &DisplaySnapshot,
