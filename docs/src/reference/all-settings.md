@@ -5792,10 +5792,15 @@ You can define these in user or project settings; project settings are merged on
     },
     "scrollbar": {
       "show": null
-    }
+    },
+    "expand_outlines_with_depth": 100,
+    "font_size": null,
+    "line_height": 1.5
   }
 }
 ```
+
+`font_size` sets the font size of the outline entries in pixels; `null` follows the UI font size. `line_height` is the height of an entry as a multiple of the font size.
 
 ## Calls
 

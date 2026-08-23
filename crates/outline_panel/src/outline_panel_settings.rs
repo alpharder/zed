@@ -1,5 +1,5 @@
 use editor::{EditorSettings, ui_scrollbar_settings_from_raw};
-use gpui::{App, Pixels};
+use gpui::{App, Pixels, px};
 pub use settings::{DockSide, Settings, ShowIndentGuides};
 use settings::{IntoGpui, RegisterSetting};
 use ui::scrollbars::{ScrollbarVisibility, ShowScrollbar};
@@ -18,6 +18,9 @@ pub struct OutlinePanelSettings {
     pub auto_fold_dirs: bool,
     pub scrollbar: ScrollbarSettings,
     pub expand_outlines_with_depth: usize,
+    /// Falls back to the UI font size when unset.
+    pub font_size: Option<Pixels>,
+    pub line_height: f32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -76,6 +79,8 @@ impl Settings for OutlinePanelSettings {
                     .map(ui_scrollbar_settings_from_raw),
             },
             expand_outlines_with_depth: panel.expand_outlines_with_depth.unwrap(),
+            font_size: panel.font_size.map(|font_size| px(font_size.0)),
+            line_height: panel.line_height.unwrap().max(1.0),
         }
     }
 }

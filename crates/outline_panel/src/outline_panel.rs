@@ -51,7 +51,7 @@ use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, FluentBuilder, HighlightedLabel, IconButton, IconButtonShape, IndentGuideColors,
     IndentGuideLayout, KeyBinding, ListItem, ScrollAxes, Scrollbars, Tab, Tooltip, WithScrollbar,
-    prelude::*,
+    prelude::*, utils::WithRemSize,
 };
 use util::{RangeExt, ResultExt, TryFutureExt, debug_panic, rel_path::RelPath};
 use workspace::{
@@ -2660,7 +2660,12 @@ impl OutlinePanel {
                     .child(
                         h_flex()
                             .child(h_flex().w(px(16.)).justify_center().child(icon_element))
-                            .child(h_flex().h_6().child(label_element).ml_1()),
+                            .child(
+                                h_flex()
+                                    .h(rems(settings.line_height))
+                                    .child(label_element)
+                                    .ml_1(),
+                            ),
                     )
                     .on_secondary_mouse_down(cx.listener(
                         move |outline_panel, event: &MouseDownEvent, window, cx| {
@@ -4781,10 +4786,20 @@ impl OutlinePanel {
                 })
             };
 
+            let panel_settings = OutlinePanelSettings::get_global(cx);
+            let font_size = panel_settings
+                .font_size
+                .unwrap_or_else(|| ThemeSettings::get_global(cx).ui_font_size(cx));
+
             v_flex()
                 .flex_shrink_1()
                 .size_full()
-                .child(list_contents.size_full().flex_shrink_1())
+                .child(
+                    WithRemSize::new(font_size)
+                        .size_full()
+                        .flex_shrink_1()
+                        .child(list_contents.size_full().flex_shrink_1()),
+                )
                 .custom_scrollbars(
                     Scrollbars::for_settings::<OutlinePanelSettingsScrollbarProxy>()
                         .tracked_scroll_handle(&self.scroll_handle.clone())
@@ -6868,6 +6883,35 @@ outline: struct OutlineEntryExcerpt
             }
         }
         display_string
+    }
+
+    #[gpui::test]
+    fn test_entry_font_size_and_line_height_settings(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        cx.update(|cx| {
+            let settings = OutlinePanelSettings::get_global(cx);
+            assert_eq!(
+                settings.font_size, None,
+                "entries follow the UI font size by default"
+            );
+            assert_eq!(settings.line_height, 1.5);
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    let outline_panel = settings.outline_panel.get_or_insert_default();
+                    outline_panel.font_size = Some(settings::FontSize(11.0));
+                    outline_panel.line_height = Some(0.5);
+                });
+            });
+
+            let settings = OutlinePanelSettings::get_global(cx);
+            assert_eq!(settings.font_size, Some(px(11.0)));
+            assert_eq!(
+                settings.line_height, 1.0,
+                "a line height below 1.0 would clip the text and is clamped"
+            );
+        });
     }
 
     fn init_test(cx: &mut TestAppContext) {

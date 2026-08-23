@@ -5854,7 +5854,7 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
-    fn outline_panel_section() -> [SettingsPageItem; 11] {
+    fn outline_panel_section() -> [SettingsPageItem; 13] {
         [
             SettingsPageItem::SectionHeader("Outline Panel"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -5908,6 +5908,52 @@ fn panels_page() -> SettingsPage {
                             .outline_panel
                             .get_or_insert_default()
                             .default_width = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Font Size",
+                description: "Font size of the outline panel entries. Falls back to the UI font size.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("outline_panel.font_size"),
+                    pick: |settings_content| {
+                        settings_content
+                            .outline_panel
+                            .as_ref()
+                            .and_then(|outline_panel| outline_panel.font_size.as_ref())
+                            .or(settings_content.theme.ui_font_size.as_ref())
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .outline_panel
+                            .get_or_insert_default()
+                            .font_size = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Line Height",
+                description: "Line height of the outline panel entries, as a multiple of the font size (at least 1.0).",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("outline_panel.line_height"),
+                    pick: |settings_content| {
+                        settings_content
+                            .outline_panel
+                            .as_ref()?
+                            .line_height
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .outline_panel
+                            .get_or_insert_default()
+                            .line_height = value.map(|line_height| f32::max(line_height, 1.0));
                     },
                 }),
                 metadata: None,

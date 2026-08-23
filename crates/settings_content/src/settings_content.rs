@@ -1166,6 +1166,14 @@ pub struct OutlinePanelSettingsContent {
     ///
     /// Default: 100
     pub expand_outlines_with_depth: Option<usize>,
+    /// Font size of the outline panel entries.
+    ///
+    /// Default: the UI font size
+    pub font_size: Option<FontSize>,
+    /// Line height of the outline panel entries, as a multiple of the font size.
+    ///
+    /// Default: 1.5
+    pub line_height: Option<f32>,
 }
 
 #[derive(
