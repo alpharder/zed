@@ -987,6 +987,14 @@
     // Default depth to expand outline items in the current file.
     // Set to 0 to collapse all items that have children, 1 or higher to collapse items at that depth or deeper.
     "expand_outlines_with_depth": 100,
+    // Font size of the outline panel entries.
+    //
+    // Default: null (the UI font size)
+    "font_size": null,
+    // Line height of the outline panel entries, as a multiple of the font size.
+    //
+    // Default: 1.5
+    "line_height": 1.5,
   },
   "collaboration_panel": {
     // Whether to show the collaboration panel button in the status bar.
