@@ -1,6 +1,7 @@
-use crate::{BufferSnapshot, Point, ToPoint, ToTreeSitterPoint};
+use crate::{BufferSnapshot, OutlineKind, Point, ToPoint, ToTreeSitterPoint};
 use fuzzy_nucleo::{Case, LengthPenalty, StringMatch, StringMatchCandidate};
 use gpui::{BackgroundExecutor, HighlightStyle, SharedString};
+use settings::HiddenOutlineSymbol;
 use std::ops::Range;
 
 /// An outline of all the symbols contained in a buffer.
@@ -18,6 +19,8 @@ pub struct Outline<T> {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct OutlineItem<T> {
     pub depth: usize,
+    /// What the item declares, when the outline source knows it.
+    pub kind: Option<OutlineKind>,
     pub range: Range<T>,
     pub selection_range: Range<T>,
     pub source_range_for_text: Range<T>,
@@ -66,11 +69,81 @@ impl OutlineSearchEntry {
     }
 }
 
+/// Drops the items selected by `hidden`, together with everything nested in them.
+pub fn hide_outline_symbols<T>(
+    items: Vec<OutlineItem<T>>,
+    hidden: &[HiddenOutlineSymbol],
+) -> Vec<OutlineItem<T>> {
+    if hidden.is_empty() {
+        return items;
+    }
+    let mut ancestors: Vec<(usize, OutlineKind)> = Vec::new();
+    let mut hidden_depth = None;
+    items
+        .into_iter()
+        .filter(|item| {
+            while ancestors
+                .last()
+                .is_some_and(|(depth, _)| *depth >= item.depth)
+            {
+                ancestors.pop();
+            }
+            if let Some(depth) = hidden_depth {
+                if item.depth > depth {
+                    return false;
+                }
+                hidden_depth = None;
+            }
+            let Some(kind) = item.kind else {
+                return true;
+            };
+            let inside_local_scope = ancestors
+                .iter()
+                .any(|(_, ancestor)| ancestor.opens_local_scope());
+            let hide = hidden.iter().any(|selector| match selector {
+                HiddenOutlineSymbol::Local => inside_local_scope && kind.is_local_declaration(),
+                selector => outline_kind_for_selector(*selector) == Some(kind),
+            });
+            if hide {
+                hidden_depth = Some(item.depth);
+                return false;
+            }
+            ancestors.push((item.depth, kind));
+            true
+        })
+        .collect()
+}
+
+fn outline_kind_for_selector(selector: HiddenOutlineSymbol) -> Option<OutlineKind> {
+    Some(match selector {
+        HiddenOutlineSymbol::Local => return None,
+        HiddenOutlineSymbol::Function => OutlineKind::Function,
+        HiddenOutlineSymbol::Method => OutlineKind::Method,
+        HiddenOutlineSymbol::Constructor => OutlineKind::Constructor,
+        HiddenOutlineSymbol::Class => OutlineKind::Class,
+        HiddenOutlineSymbol::Struct => OutlineKind::Struct,
+        HiddenOutlineSymbol::Interface => OutlineKind::Interface,
+        HiddenOutlineSymbol::Trait => OutlineKind::Trait,
+        HiddenOutlineSymbol::Type => OutlineKind::TypeAlias,
+        HiddenOutlineSymbol::Enum => OutlineKind::Enum,
+        HiddenOutlineSymbol::EnumMember => OutlineKind::EnumMember,
+        HiddenOutlineSymbol::Variable => OutlineKind::Variable,
+        HiddenOutlineSymbol::Constant => OutlineKind::Constant,
+        HiddenOutlineSymbol::Property => OutlineKind::Property,
+        HiddenOutlineSymbol::Field => OutlineKind::Field,
+        HiddenOutlineSymbol::Namespace => OutlineKind::Namespace,
+        HiddenOutlineSymbol::Module => OutlineKind::Module,
+        HiddenOutlineSymbol::Test => OutlineKind::Test,
+        HiddenOutlineSymbol::Heading => OutlineKind::Heading,
+    })
+}
+
 impl<T: ToPoint> OutlineItem<T> {
     /// Converts to an equivalent outline item, but with parameterized over Points.
     pub fn to_point(&self, buffer: &BufferSnapshot) -> OutlineItem<Point> {
         OutlineItem {
             depth: self.depth,
+            kind: self.kind,
             range: self.range.start.to_point(buffer)..self.range.end.to_point(buffer),
             selection_range: self.selection_range.start.to_point(buffer)
                 ..self.selection_range.end.to_point(buffer),
@@ -317,6 +390,7 @@ mod tests {
 
         let item = OutlineItem {
             depth: 0,
+            kind: None,
             range: range.clone(),
             selection_range: range.clone(),
             source_range_for_text: range,
@@ -335,6 +409,7 @@ mod tests {
         let outline = Outline::new(vec![
             OutlineItem {
                 depth: 0,
+                kind: None,
                 range: Point::new(0, 0)..Point::new(5, 0),
                 selection_range: Point::new(0, 6)..Point::new(0, 9),
                 source_range_for_text: Point::new(0, 0)..Point::new(0, 9),
@@ -346,6 +421,7 @@ mod tests {
             },
             OutlineItem {
                 depth: 0,
+                kind: None,
                 range: Point::new(2, 0)..Point::new(2, 7),
                 selection_range: Point::new(2, 0)..Point::new(2, 7),
                 source_range_for_text: Point::new(0, 0)..Point::new(0, 7),
@@ -374,10 +450,91 @@ mod tests {
     }
 
     #[test]
+    fn test_hide_outline_symbols() {
+        let item = |depth: usize, kind: Option<OutlineKind>, text: &str| OutlineItem {
+            depth,
+            kind,
+            range: Point::new(0, 0)..Point::new(0, 0),
+            selection_range: Point::new(0, 0)..Point::new(0, 0),
+            source_range_for_text: Point::new(0, 0)..Point::new(0, 0),
+            text: text.into(),
+            highlight_ranges: vec![],
+            name_ranges: vec![],
+            body_range: None,
+            annotation_range: None,
+        };
+        let items = || {
+            vec![
+                item(0, Some(OutlineKind::Function), "f"),
+                item(1, Some(OutlineKind::Variable), "local"),
+                item(1, Some(OutlineKind::Property), "returned"),
+                item(2, Some(OutlineKind::Property), "nested in returned"),
+                item(1, Some(OutlineKind::Function), "closure"),
+                item(2, Some(OutlineKind::Constant), "closure local"),
+                item(0, Some(OutlineKind::Class), "C"),
+                item(1, Some(OutlineKind::Method), "m"),
+                item(2, Some(OutlineKind::Variable), "method local"),
+                item(1, Some(OutlineKind::Field), "field"),
+                item(0, Some(OutlineKind::Variable), "config"),
+                item(1, Some(OutlineKind::Property), "config key"),
+                item(0, Some(OutlineKind::Test), "describe"),
+                item(1, Some(OutlineKind::Variable), "test local"),
+                item(0, None, "unknown"),
+                item(1, Some(OutlineKind::Variable), "under unknown"),
+            ]
+        };
+        let texts = |items: Vec<OutlineItem<Point>>| {
+            items
+                .into_iter()
+                .map(|item| item.text.to_string())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            texts(hide_outline_symbols(items(), &[HiddenOutlineSymbol::Local])),
+            [
+                "f",
+                "closure",
+                "C",
+                "m",
+                "field",
+                "config",
+                "config key",
+                "describe",
+                "unknown",
+                "under unknown",
+            ],
+            "local declarations are hidden inside functions, methods and tests only"
+        );
+        assert_eq!(
+            texts(hide_outline_symbols(
+                items(),
+                &[HiddenOutlineSymbol::Test, HiddenOutlineSymbol::Property]
+            )),
+            [
+                "f",
+                "local",
+                "closure",
+                "closure local",
+                "C",
+                "m",
+                "method local",
+                "field",
+                "config",
+                "unknown",
+                "under unknown",
+            ],
+            "a hidden symbol takes its children with it"
+        );
+        assert_eq!(hide_outline_symbols(items(), &[]).len(), items().len());
+    }
+
+    #[test]
     fn test_find_most_similar_with_low_similarity() {
         let outline = Outline::new(vec![
             OutlineItem {
                 depth: 0,
+                kind: None,
                 range: Point::new(0, 0)..Point::new(5, 0),
                 selection_range: Point::new(0, 3)..Point::new(0, 10),
                 source_range_for_text: Point::new(0, 0)..Point::new(0, 10),
@@ -389,6 +546,7 @@ mod tests {
             },
             OutlineItem {
                 depth: 0,
+                kind: None,
                 range: Point::new(7, 0)..Point::new(12, 0),
                 selection_range: Point::new(0, 7)..Point::new(0, 20),
                 source_range_for_text: Point::new(0, 0)..Point::new(0, 20),

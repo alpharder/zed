@@ -4650,6 +4650,7 @@ impl BufferSnapshot {
 
             anchor_items.push(OutlineItem {
                 depth: item_ends_stack.len(),
+                kind: item.kind,
                 range: range_callback(self, item.range.clone()),
                 selection_range: range_callback(self, item.selection_range.clone()),
                 source_range_for_text: range_callback(self, item.source_range_for_text.clone()),
@@ -4684,6 +4685,13 @@ impl BufferSnapshot {
                 None
             }
         })?;
+        let kind = mat.captures.iter().find_map(|capture| {
+            config
+                .kind_capture_ixs
+                .iter()
+                .find(|(capture_ix, _)| *capture_ix == capture.index)
+                .map(|(_, kind)| *kind)
+        });
 
         let item_byte_range = item_node.byte_range();
         if item_byte_range.end < range.start || item_byte_range.start > range.end {
@@ -4750,7 +4758,13 @@ impl BufferSnapshot {
         );
         let mut last_buffer_range_end = 0;
         for (buffer_range, is_name) in buffer_ranges {
-            let space_added = !text.is_empty() && buffer_range.start > last_buffer_range_end;
+            // Parameter lists are captured as their parentheses only, so the skipped parameters
+            // must not leave a gap: `foo()` rather than `foo( )`.
+            let closes_parentheses =
+                text.ends_with('(') && self.chars_at(buffer_range.start).next() == Some(')');
+            let space_added = !text.is_empty()
+                && buffer_range.start > last_buffer_range_end
+                && !closes_parentheses;
             if space_added {
                 text.push(' ');
             }
@@ -4793,6 +4807,7 @@ impl BufferSnapshot {
 
         Some(OutlineItem {
             depth: 0, // We'll calculate the depth later
+            kind,
             range: item_point_range,
             selection_range: selection_range.to_point(self),
             source_range_for_text: source_range_for_text.to_point(self),

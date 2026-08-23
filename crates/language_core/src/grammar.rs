@@ -1,3 +1,4 @@
+use crate::code_label::OutlineKind;
 use crate::{
     HighlightId, HighlightMap, LanguageConfig, LanguageConfigOverride, LanguageName,
     LanguageQueries, language_config::BracketPairConfig,
@@ -123,6 +124,8 @@ pub struct OutlineConfig {
     pub open_capture_ix: Option<u32>,
     pub close_capture_ix: Option<u32>,
     pub annotation_capture_ix: Option<u32>,
+    /// Captures named `kind.<kind>`, placed on the same node as `item` to classify it.
+    pub kind_capture_ixs: Vec<(u32, OutlineKind)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -514,7 +517,7 @@ impl Grammar {
             &query,
             language_name,
             "outline",
-            &[],
+            &["kind."],
             &mut [
                 Capture::Required("item", &mut item_capture_ix),
                 Capture::Required("name", &mut name_capture_ix),
@@ -525,6 +528,21 @@ impl Grammar {
                 Capture::Optional("annotation", &mut annotation_capture_ix),
             ],
         ) {
+            let kind_capture_ixs = query
+                .capture_names()
+                .iter()
+                .enumerate()
+                .filter_map(|(ix, name)| {
+                    let kind_name = name.strip_prefix("kind.")?;
+                    let kind = OutlineKind::from_capture_name(kind_name);
+                    if kind.is_none() {
+                        log::warn!(
+                            "unrecognized outline kind '{kind_name}' in {language_name} outline TreeSitter query"
+                        );
+                    }
+                    Some((ix as u32, kind?))
+                })
+                .collect();
             self.outline_config = Some(OutlineConfig {
                 query,
                 item_capture_ix,
@@ -534,6 +552,7 @@ impl Grammar {
                 open_capture_ix,
                 close_capture_ix,
                 annotation_capture_ix,
+                kind_capture_ixs,
             });
         }
         Ok(self)

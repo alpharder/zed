@@ -13,7 +13,9 @@ use ec4rs::{
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
 use gpui::{App, Modifiers, SharedString};
 use itertools::Itertools;
-use settings::{DelayMs, DocumentFoldingRanges, DocumentSymbols, IntoGpui, SemanticTokens};
+use settings::{
+    DelayMs, DocumentFoldingRanges, DocumentSymbols, HiddenOutlineSymbol, IntoGpui, SemanticTokens,
+};
 
 pub use settings::{
     AutoIndentMode, CompletionSettingsContent, ConfiguredLanguageServer,
@@ -110,6 +112,8 @@ pub struct LanguageSettings {
     pub document_folding_ranges: DocumentFoldingRanges,
     /// Controls the source of document symbols used for outlines and breadcrumbs.
     pub document_symbols: DocumentSymbols,
+    /// Symbols to leave out of the outline panel and the outline modal.
+    pub hidden_outline_symbols: Vec<HiddenOutlineSymbol>,
     /// Controls where the `editor::Rewrap` action is allowed for this language.
     ///
     /// Note: This setting has no effect in Vim mode, as rewrap is already
@@ -819,6 +823,7 @@ impl settings::Settings for AllLanguageSettings {
                 semantic_tokens: settings.semantic_tokens.unwrap(),
                 document_folding_ranges: settings.document_folding_ranges.unwrap(),
                 document_symbols: settings.document_symbols.unwrap(),
+                hidden_outline_symbols: settings.hidden_outline_symbols.unwrap(),
                 allow_rewrap: settings.allow_rewrap.unwrap(),
                 show_edit_predictions: settings.show_edit_predictions.unwrap(),
                 edit_predictions_disabled_in: settings.edit_predictions_disabled_in.unwrap(),

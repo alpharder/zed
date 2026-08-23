@@ -41,6 +41,7 @@ use std::{
     u32,
 };
 
+use outline::OutlineSettings;
 use outline_panel_settings::{DockSide, OutlinePanelSettings, ShowIndentGuides};
 use project::{File, Fs, GitEntry, GitTraversal, Project, ProjectItem};
 use search::{BufferSearchBar, ProjectSearchView};
@@ -51,7 +52,7 @@ use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, FluentBuilder, HighlightedLabel, IconButton, IconButtonShape, IndentGuideColors,
     IndentGuideLayout, KeyBinding, ListItem, ScrollAxes, Scrollbars, Tab, Tooltip, WithScrollbar,
-    prelude::*,
+    prelude::*, utils::WithRemSize,
 };
 use util::{RangeExt, ResultExt, TryFutureExt, debug_panic, rel_path::RelPath};
 use workspace::{
@@ -2285,14 +2286,13 @@ impl OutlinePanel {
             outline.range, outline.text,
         )));
 
-        let label_element = outline::render_item(
+        let label_element = outline::render_item_with_icon(
             &outline,
             string_match
                 .map(|string_match| string_match.ranges().collect::<Vec<_>>())
                 .unwrap_or_default(),
             cx,
-        )
-        .into_any_element();
+        );
 
         let is_active = match self.selected_entry() {
             Some(PanelEntry::Outline(OutlineEntry::Outline(selected))) => outline == selected,
@@ -2565,6 +2565,7 @@ impl OutlinePanel {
         let label_element = outline::render_item(
             &OutlineItem {
                 depth,
+                kind: None,
                 annotation_range: None,
                 range: search_data.context_range.clone(),
                 selection_range: search_data.context_range.clone(),
@@ -2660,7 +2661,12 @@ impl OutlinePanel {
                     .child(
                         h_flex()
                             .child(h_flex().w(px(16.)).justify_center().child(icon_element))
-                            .child(h_flex().h_6().child(label_element).ml_1()),
+                            .child(
+                                h_flex()
+                                    .h(OutlineSettings::get_global(cx).row_height())
+                                    .child(label_element)
+                                    .ml_1(),
+                            ),
                     )
                     .on_secondary_mouse_down(cx.listener(
                         move |outline_panel, event: &MouseDownEvent, window, cx| {
@@ -4781,10 +4787,17 @@ impl OutlinePanel {
                 })
             };
 
+            let font_size = OutlineSettings::get_global(cx).rem_size(cx);
+
             v_flex()
                 .flex_shrink_1()
                 .size_full()
-                .child(list_contents.size_full().flex_shrink_1())
+                .child(
+                    WithRemSize::new(font_size)
+                        .size_full()
+                        .flex_shrink_1()
+                        .child(list_contents.size_full().flex_shrink_1()),
+                )
                 .custom_scrollbars(
                     Scrollbars::for_settings::<OutlinePanelSettingsScrollbarProxy>()
                         .tracked_scroll_handle(&self.scroll_handle.clone())
@@ -6868,6 +6881,35 @@ outline: struct OutlineEntryExcerpt
             }
         }
         display_string
+    }
+
+    #[gpui::test]
+    fn test_entry_font_size_and_line_height_settings(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        cx.update(|cx| {
+            let settings = OutlineSettings::get_global(cx);
+            assert_eq!(
+                settings.font_size, None,
+                "entries follow the default font sizes"
+            );
+            assert_eq!(settings.line_height, 1.5);
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    let outline_panel = settings.outline_panel.get_or_insert_default();
+                    outline_panel.font_size = Some(settings::FontSize(11.0));
+                    outline_panel.line_height = Some(0.5);
+                });
+            });
+
+            let settings = OutlineSettings::get_global(cx);
+            assert_eq!(settings.font_size, Some(px(11.0)));
+            assert_eq!(
+                settings.line_height, 1.0,
+                "a line height below 1.0 would clip the text and is clamped"
+            );
+        });
     }
 
     fn init_test(cx: &mut TestAppContext) {

@@ -1881,6 +1881,7 @@ impl Editor {
                 .filter_map(|outline_item| {
                     Some(OutlineItem {
                         depth: outline_item.depth,
+                        kind: outline_item.kind,
                         range: multi_buffer
                             .buffer_anchor_range_to_anchor_range(outline_item.range)?,
                         selection_range: multi_buffer
