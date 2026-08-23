@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use settings_macros::{MergeFrom, with_fallible_options};
 use std::sync::Arc;
 
-use crate::{DocumentFoldingRanges, DocumentSymbols, ExtendingSet, SemanticTokens, merge_from};
+use crate::{
+    DelayMs, DocumentFoldingRanges, DocumentSymbols, ExtendingSet, HiddenOutlineSymbol,
+    SemanticTokens, merge_from,
+};
 
 /// The state of the modifier keys at some point in time
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]
@@ -139,6 +142,10 @@ pub struct EditPredictionSettingsContent {
     pub ollama: Option<OllamaEditPredictionSettingsContent>,
     /// Settings specific to using custom OpenAI-compatible servers for edit prediction.
     pub open_ai_compatible_api: Option<CustomEditPredictionProviderSettingsContent>,
+    /// Settings specific to Zed's Edit Predictions provider.
+    pub zed: Option<ZedEditPredictionSettingsContent>,
+    /// Settings specific to the Mercury Edit Predictions provider.
+    pub mercury: Option<MercuryEditPredictionSettingsContent>,
     /// Controls whether Zed may collect training data when using Zed's Edit Predictions.
     /// Data is only ever captured for files in projects that are detected as open source.
     ///
@@ -168,6 +175,11 @@ pub struct CustomEditPredictionProviderSettingsContent {
     ///
     /// Default: 256
     pub max_output_tokens: Option<u32>,
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 0
+    pub prediction_debounce: Option<DelayMs>,
 }
 
 #[derive(
@@ -220,6 +232,11 @@ pub struct CopilotSettingsContent {
     ///
     /// Default: true
     pub enable_next_edit_suggestions: Option<bool>,
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 75
+    pub prediction_debounce: Option<DelayMs>,
 }
 
 #[with_fallible_options]
@@ -237,6 +254,33 @@ pub struct CodestralSettingsContent {
     ///
     /// Default: "https://codestral.mistral.ai"
     pub api_url: Option<String>,
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 150
+    pub prediction_debounce: Option<DelayMs>,
+}
+
+/// Settings specific to Zed's Edit Predictions provider.
+#[with_fallible_options]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+pub struct ZedEditPredictionSettingsContent {
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 0
+    pub prediction_debounce: Option<DelayMs>,
+}
+
+/// Settings specific to the Mercury Edit Predictions provider.
+#[with_fallible_options]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+pub struct MercuryEditPredictionSettingsContent {
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 0
+    pub prediction_debounce: Option<DelayMs>,
 }
 
 /// Ollama model name for edit predictions.
@@ -283,6 +327,11 @@ pub struct OllamaEditPredictionSettingsContent {
     ///
     /// Default: ""
     pub prompt_format: Option<EditPredictionPromptFormatContent>,
+    /// The debounce delay in milliseconds before automatically requesting a prediction
+    /// after typing stops. Set to 0 to request predictions immediately.
+    ///
+    /// Default: 0
+    pub prediction_debounce: Option<DelayMs>,
 }
 
 /// Controls whether Zed collects training data when using Zed's Edit Predictions.
@@ -570,6 +619,14 @@ pub struct LanguageSettingsContent {
     ///
     /// Default: "off"
     pub document_symbols: Option<DocumentSymbols>,
+    /// Symbols to leave out of the outline panel and the outline modal.
+    ///
+    /// Each entry is either "local" (variables, constants, properties and fields declared inside
+    /// a function, method or test) or a symbol kind such as "variable", "property" or "test".
+    /// Hiding a symbol also hides everything nested in it.
+    ///
+    /// Default: ["local"]
+    pub hidden_outline_symbols: Option<Vec<HiddenOutlineSymbol>>,
     /// Controls where the `editor::Rewrap` action is allowed for this language.
     ///
     /// Note: This setting has no effect in Vim mode, as rewrap is already

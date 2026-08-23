@@ -971,7 +971,7 @@ async fn test_outline_with_extra_context(cx: &mut gpui::TestAppContext) {
             .iter()
             .map(|item| (item.text.as_str(), item.depth))
             .collect::<Vec<_>>(),
-        &[("function a()", 0), ("function b( )", 0),]
+        &[("function a()", 0), ("function b()", 0),]
     );
 
     // extra context nodes do not appear in breadcrumbs.
@@ -1011,7 +1011,7 @@ async fn test_outline_selection_range_for_multiline_c_signature(cx: &mut gpui::T
 
     assert_eq!(item.source_range_for_text.start, Point::new(0, 0));
     assert_eq!(item.selection_range.start, Point::new(1, 0));
-    assert_eq!(item.text, "void evdev_post_scroll( )");
+    assert_eq!(item.text, "void evdev_post_scroll()");
 }
 
 #[gpui::test]
@@ -1666,7 +1666,7 @@ fn test_bracket_ranges_keep_pairs_straddling_a_chunk_boundary_amid_errors(cx: &m
 }
 
 #[gpui::test]
-fn test_bracket_ranges_deduplicate_overlapping_patterns(cx: &mut App) {
+async fn test_bracket_ranges_deduplicate_overlapping_patterns(cx: &mut TestAppContext) {
     let text = indoc! {r#"
         CLAY(CLAY_ID("MenuContainer"),
              CLAY_RECTANGLE({.color = {43, 41, 51, 255}}),
@@ -1693,7 +1693,10 @@ fn test_bracket_ranges_deduplicate_overlapping_patterns(cx: &mut App) {
         .unwrap(),
     );
     let buffer = cx.new(|cx| Buffer::local(text, cx).with_language(language, cx));
-    let snapshot = buffer.read(cx).snapshot();
+    buffer
+        .read_with(cx, |buffer, _| buffer.parsing_idle())
+        .await;
+    let snapshot = buffer.read_with(cx, |buffer, _| buffer.snapshot());
     assert_has_syntax_errors(&snapshot);
 
     let mut matches = snapshot

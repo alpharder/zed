@@ -1054,6 +1054,44 @@ impl DocumentFoldingRanges {
     }
 }
 
+/// An outline symbol selector for `hidden_outline_symbols`.
+#[derive(
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum HiddenOutlineSymbol {
+    /// Variables, constants, properties and fields declared inside a function, method or test.
+    Local,
+    Function,
+    Method,
+    Constructor,
+    Class,
+    Struct,
+    Interface,
+    Trait,
+    Type,
+    Enum,
+    EnumMember,
+    Variable,
+    Constant,
+    Property,
+    Field,
+    Namespace,
+    Module,
+    Test,
+    Heading,
+}
+
 #[derive(
     Debug,
     PartialEq,

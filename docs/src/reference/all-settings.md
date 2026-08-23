@@ -685,6 +685,29 @@ For the case of "open", regular selection behavior can be achieved by holding `a
 
 List of `string` values.
 
+### Prediction Debounce
+
+- Description: How long Zed waits after you stop typing before automatically requesting an edit prediction.
+- Setting: `edit_predictions.<provider>.prediction_debounce`
+- Default: `75` for GitHub Copilot, `150` for Codestral, and `0` for Zed, Mercury, Ollama, and OpenAI-compatible APIs.
+
+**Options**
+
+Non-negative integer values representing milliseconds. Set this to `0` to disable the additional delay. Configure the value under the settings object for the selected provider:
+
+```json [settings]
+{
+  "edit_predictions": {
+    "provider": "open_ai_compatible_api",
+    "open_ai_compatible_api": {
+      "prediction_debounce": 500
+    }
+  }
+}
+```
+
+See [Configuring the Prediction Debounce](../ai/edit-prediction.md#configuring-the-prediction-debounce) for more information.
+
 ## Edit Predictions Disabled in
 
 - Description: A list of language scopes in which edit predictions should be disabled.
@@ -3173,6 +3196,29 @@ Example:
   "languages": {
     "TypeScript": {
       "document_symbols": "on"
+    }
+  }
+}
+```
+
+### Hidden Outline Symbols
+
+- Description: Symbols to leave out of the outline panel and the outline modal. Hiding a symbol also hides everything nested in it.
+- Setting: `hidden_outline_symbols`
+- Default: `["local"]`
+
+**Options**
+
+- `"local"`: variables, constants, properties and fields declared inside a function, method or test
+- a symbol kind: `"function"`, `"method"`, `"constructor"`, `"class"`, `"struct"`, `"interface"`, `"trait"`, `"type"`, `"enum"`, `"enum_member"`, `"variable"`, `"constant"`, `"property"`, `"field"`, `"namespace"`, `"module"`, `"test"`, `"heading"`
+
+Example, to show every symbol the way the outline did before:
+
+```json [settings]
+{
+  "languages": {
+    "TypeScript": {
+      "hidden_outline_symbols": []
     }
   }
 }
@@ -5791,7 +5837,7 @@ You can define these in user or project settings; project settings are merged on
 }
 ```
 
-`font_size` sets the font size of the outline entries in pixels; `null` follows the UI font size. `line_height` is the height of an entry as a multiple of the font size.
+`font_size` sets the font size of the outline entries in pixels, in the outline panel and in the outline modal; `null` follows the UI font size. `line_height` is the height of an entry as a multiple of the font size.
 
 ## Calls
 

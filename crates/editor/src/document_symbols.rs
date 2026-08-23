@@ -6,7 +6,7 @@ use futures::future::join_all;
 use gpui::{App, Context, HighlightStyle, Task};
 use itertools::Itertools as _;
 use language::language_settings::LanguageSettings;
-use language::{Buffer, OutlineItem};
+use language::{Buffer, OutlineItem, hide_outline_symbols};
 use multi_buffer::{
     Anchor, AnchorRangeExt as _, MultiBufferOffset, MultiBufferRow, MultiBufferSnapshot,
     ToOffset as _,
@@ -31,12 +31,15 @@ impl Editor {
         let Some(buffer) = self.buffer.read(cx).buffer(buffer_id) else {
             return Task::ready(Vec::new());
         };
+        let hidden_symbols = LanguageSettings::for_buffer(buffer.read(cx), cx)
+            .hidden_outline_symbols
+            .clone();
 
         if lsp_symbols_enabled(buffer.read(cx), cx) {
             let refresh_task = self.refresh_document_symbols_task.clone();
             cx.spawn(async move |editor, cx| {
                 refresh_task.await;
-                editor
+                let items = editor
                     .read_with(cx, |editor, _| {
                         editor
                             .lsp_document_symbols
@@ -45,13 +48,18 @@ impl Editor {
                             .unwrap_or_default()
                     })
                     .ok()
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                hide_outline_symbols(items, &hidden_symbols)
             })
         } else {
             let buffer_snapshot = buffer.read(cx).snapshot();
             let syntax = cx.theme().syntax().clone();
-            cx.background_executor()
-                .spawn(async move { buffer_snapshot.outline(Some(&syntax)).items })
+            cx.background_executor().spawn(async move {
+                hide_outline_symbols(
+                    buffer_snapshot.outline(Some(&syntax)).items,
+                    &hidden_symbols,
+                )
+            })
         }
     }
 
@@ -102,6 +110,7 @@ impl Editor {
                     multi_buffer_snapshot.anchor_in_buffer(item.source_range_for_text.end)?;
                 Some(OutlineItem {
                     depth: item.depth,
+                    kind: item.kind,
                     range: range_start..range_end,
                     selection_range: multi_buffer_snapshot
                         .anchor_in_buffer(item.selection_range.start)?

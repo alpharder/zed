@@ -41,6 +41,7 @@ use std::{
     u32,
 };
 
+use outline::OutlineSettings;
 use outline_panel_settings::{DockSide, OutlinePanelSettings, ShowIndentGuides};
 use project::{File, Fs, GitEntry, GitTraversal, Project, ProjectItem};
 use search::{BufferSearchBar, ProjectSearchView};
@@ -2285,14 +2286,13 @@ impl OutlinePanel {
             outline.range, outline.text,
         )));
 
-        let label_element = outline::render_item(
+        let label_element = outline::render_item_with_icon(
             &outline,
             string_match
                 .map(|string_match| string_match.ranges().collect::<Vec<_>>())
                 .unwrap_or_default(),
             cx,
-        )
-        .into_any_element();
+        );
 
         let is_active = match self.selected_entry() {
             Some(PanelEntry::Outline(OutlineEntry::Outline(selected))) => outline == selected,
@@ -2565,6 +2565,7 @@ impl OutlinePanel {
         let label_element = outline::render_item(
             &OutlineItem {
                 depth,
+                kind: None,
                 annotation_range: None,
                 range: search_data.context_range.clone(),
                 selection_range: search_data.context_range.clone(),
@@ -2662,7 +2663,7 @@ impl OutlinePanel {
                             .child(h_flex().w(px(16.)).justify_center().child(icon_element))
                             .child(
                                 h_flex()
-                                    .h(rems(settings.line_height))
+                                    .h(OutlineSettings::get_global(cx).row_height())
                                     .child(label_element)
                                     .ml_1(),
                             ),
@@ -4786,10 +4787,7 @@ impl OutlinePanel {
                 })
             };
 
-            let panel_settings = OutlinePanelSettings::get_global(cx);
-            let font_size = panel_settings
-                .font_size
-                .unwrap_or_else(|| ThemeSettings::get_global(cx).ui_font_size(cx));
+            let font_size = OutlineSettings::get_global(cx).rem_size(cx);
 
             v_flex()
                 .flex_shrink_1()
@@ -6890,10 +6888,10 @@ outline: struct OutlineEntryExcerpt
         init_test(cx);
 
         cx.update(|cx| {
-            let settings = OutlinePanelSettings::get_global(cx);
+            let settings = OutlineSettings::get_global(cx);
             assert_eq!(
                 settings.font_size, None,
-                "entries follow the UI font size by default"
+                "entries follow the default font sizes"
             );
             assert_eq!(settings.line_height, 1.5);
 
@@ -6905,7 +6903,7 @@ outline: struct OutlineEntryExcerpt
                 });
             });
 
-            let settings = OutlinePanelSettings::get_global(cx);
+            let settings = OutlineSettings::get_global(cx);
             assert_eq!(settings.font_size, Some(px(11.0)));
             assert_eq!(
                 settings.line_height, 1.0,

@@ -41,7 +41,7 @@ use gpui::{App, AsyncApp, Entity};
 use http_client::HttpClient;
 
 pub use language_core::{
-    SymbolKind,
+    OutlineKind, SymbolKind,
     highlight_map::{HighlightId, HighlightMap},
 };
 

@@ -117,6 +117,7 @@ pub enum Event {
         transaction_id: TransactionId,
     },
     Reloaded,
+    CapabilityChanged,
     LanguageChanged(BufferId, bool),
     Reparsed(BufferId),
     Saved,
@@ -2012,7 +2013,7 @@ impl MultiBuffer {
             BufferEvent::DiagnosticsUpdated => Event::DiagnosticsUpdated,
             BufferEvent::CapabilityChanged => {
                 self.capability = buffer.read(cx).capability();
-                return;
+                Event::CapabilityChanged
             }
             BufferEvent::Operation { .. } | BufferEvent::ReloadNeeded => return,
         });
@@ -6343,6 +6344,7 @@ impl MultiBufferSnapshot {
                 .into_iter()
                 .map(|item| OutlineItem {
                     depth: item.depth,
+                    kind: item.kind,
                     range: Anchor::range_in_buffer(path_key_index, item.range),
                     selection_range: Anchor::range_in_buffer(path_key_index, item.selection_range),
                     source_range_for_text: Anchor::range_in_buffer(
@@ -6387,6 +6389,7 @@ impl MultiBufferSnapshot {
                 .flat_map(|item| {
                     Some(OutlineItem {
                         depth: item.depth,
+                        kind: item.kind,
                         selection_range: Anchor::range_in_buffer(
                             excerpt.path_key_index,
                             item.selection_range,

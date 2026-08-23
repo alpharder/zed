@@ -3,4 +3,4 @@
     .
     (_) @context
     .
-    (_) @name)) @item
+    (_) @name)) @item @kind.heading
