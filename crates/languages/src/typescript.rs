@@ -909,6 +909,7 @@ mod tests {
     use std::path::Path;
 
     use gpui::{AppContext as _, BackgroundExecutor, Hsla, TestAppContext};
+    use language::OutlineKind;
     use project::FakeFs;
     use rope::Rope;
     use serde_json::json;
@@ -979,18 +980,62 @@ mod tests {
                 outline
                     .items
                     .iter()
-                    .map(|item| (item.text.as_str(), item.depth))
+                    .map(|item| (item.text.as_str(), item.depth, item.kind))
                     .collect::<Vec<_>>(),
                 &[
-                    ("function a()", 0),
-                    ("let a1", 1),
-                    ("async function a2()", 1),
-                    ("let b", 0),
-                    ("function getB()", 0),
-                    ("const d", 0),
+                    ("function a()", 0, Some(OutlineKind::Function)),
+                    ("let a1", 1, Some(OutlineKind::Variable)),
+                    ("async function a2()", 1, Some(OutlineKind::Function)),
+                    ("let b", 0, Some(OutlineKind::Variable)),
+                    ("function getB()", 0, Some(OutlineKind::Function)),
+                    ("const d", 0, Some(OutlineKind::Variable)),
                 ]
             );
         }
+    }
+
+    #[gpui::test]
+    async fn test_outline_kinds(cx: &mut TestAppContext) {
+        let language = crate::language(
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        );
+        let text = r#"
+            namespace N {}
+            enum E {}
+            type T = number;
+            interface I {}
+            class C {
+              field = 1;
+              method() {}
+            }
+            const o = { prop: 1, method() {} };
+            describe("suite", () => {});
+        "#
+        .unindent();
+
+        let buffer = cx.new(|cx| language::Buffer::local(text, cx).with_language(language, cx));
+        let outline = buffer.read_with(cx, |buffer, _| buffer.snapshot().outline(None));
+        assert_eq!(
+            outline
+                .items
+                .iter()
+                .map(|item| (item.text.as_str(), item.kind))
+                .collect::<Vec<_>>(),
+            &[
+                ("namespace N", Some(OutlineKind::Namespace)),
+                ("enum E", Some(OutlineKind::Enum)),
+                ("type T", Some(OutlineKind::TypeAlias)),
+                ("interface I", Some(OutlineKind::Interface)),
+                ("class C", Some(OutlineKind::Class)),
+                ("field", Some(OutlineKind::Field)),
+                ("method()", Some(OutlineKind::Method)),
+                ("const o", Some(OutlineKind::Variable)),
+                ("prop", Some(OutlineKind::Property)),
+                ("method()", Some(OutlineKind::Method)),
+                ("describe suite", Some(OutlineKind::Test)),
+            ]
+        );
     }
 
     #[gpui::test]
@@ -1338,7 +1383,7 @@ mod tests {
                     ("getters", 1),
                     ("currentUser()", 2),
                     ("isAuthenticated()", 2),
-                    ("function registerPlugin( )", 0),
+                    ("function registerPlugin()", 0),
                 ]
             );
         }
@@ -1475,7 +1520,7 @@ mod tests {
                 ("function normalFunction()", 0),
                 ("function* simpleGenerator()", 0),
                 ("async function* asyncGenerator()", 0),
-                ("function* generatorWithParams( )", 0),
+                ("function* generatorWithParams()", 0),
                 ("class TestClass", 0),
                 ("*methodGenerator()", 1),
                 ("async *asyncMethodGenerator()", 1),

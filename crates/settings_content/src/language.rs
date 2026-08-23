@@ -7,7 +7,8 @@ use settings_macros::{MergeFrom, with_fallible_options};
 use std::sync::Arc;
 
 use crate::{
-    DelayMs, DocumentFoldingRanges, DocumentSymbols, ExtendingSet, SemanticTokens, merge_from,
+    DelayMs, DocumentFoldingRanges, DocumentSymbols, ExtendingSet, HiddenOutlineSymbol,
+    SemanticTokens, merge_from,
 };
 
 /// The state of the modifier keys at some point in time
@@ -618,6 +619,14 @@ pub struct LanguageSettingsContent {
     ///
     /// Default: "off"
     pub document_symbols: Option<DocumentSymbols>,
+    /// Symbols to leave out of the outline panel and the outline modal.
+    ///
+    /// Each entry is either "local" (variables, constants, properties and fields declared inside
+    /// a function, method or test) or a symbol kind such as "variable", "property" or "test".
+    /// Hiding a symbol also hides everything nested in it.
+    ///
+    /// Default: ["local"]
+    pub hidden_outline_symbols: Option<Vec<HiddenOutlineSymbol>>,
     /// Controls where the `editor::Rewrap` action is allowed for this language.
     ///
     /// Note: This setting has no effect in Vim mode, as rewrap is already

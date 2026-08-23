@@ -987,11 +987,11 @@
     // Default depth to expand outline items in the current file.
     // Set to 0 to collapse all items that have children, 1 or higher to collapse items at that depth or deeper.
     "expand_outlines_with_depth": 100,
-    // Font size of the outline panel entries.
+    // Font size of the outline entries, in the outline panel and in the outline modal.
     //
     // Default: null (the UI font size)
     "font_size": null,
-    // Line height of the outline panel entries, as a multiple of the font size.
+    // Line height of the outline entries, as a multiple of the font size.
     //
     // Default: 1.5
     "line_height": 1.5,
@@ -1347,6 +1347,15 @@
   // - "off": Use tree-sitter queries to compute document symbols (default).
   // - "on": Use the language server's `textDocument/documentSymbol` LSP response. When enabled, tree-sitter is not used for document symbols.
   "document_symbols": "off",
+  // Symbols to leave out of the outline panel and the outline modal.
+  //
+  // Each entry is either "local" (variables, constants, properties and fields
+  // declared inside a function, method or test) or a symbol kind such as
+  // "variable", "property" or "test". Hiding a symbol also hides everything
+  // nested in it.
+  //
+  // Default: ["local"]
+  "hidden_outline_symbols": ["local"],
 
   // When to automatically save edited buffers. This setting can
   // take four values.

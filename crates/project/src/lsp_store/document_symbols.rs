@@ -8,7 +8,7 @@ use futures::FutureExt as _;
 use futures::future::{Shared, join_all};
 use gpui::{AppContext as _, AsyncApp, Context, Entity, Task};
 use itertools::Itertools;
-use language::{Buffer, BufferSnapshot, OutlineItem};
+use language::{Buffer, BufferSnapshot, OutlineItem, OutlineKind};
 use lsp::LanguageServerId;
 use rpc::{TypedEnvelope, proto};
 use settings::Settings as _;
@@ -355,6 +355,7 @@ fn flatten_document_symbols(
 
         output.push(OutlineItem {
             depth,
+            kind: OutlineKind::from_symbol_kind(symbol.kind),
             range,
             selection_range: selection_range.clone(),
             source_range_for_text,

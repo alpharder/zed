@@ -48,6 +48,102 @@ macro_rules! proto_mapping {
     };
 }
 
+/// The kind of a symbol shown in an outline. Richer than [`SymbolKind`], because tree-sitter
+/// queries can distinguish declarations that LSP folds into one kind.
+#[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
+pub enum OutlineKind {
+    Function,
+    Method,
+    Constructor,
+    Class,
+    Struct,
+    Interface,
+    Trait,
+    TypeAlias,
+    Enum,
+    EnumMember,
+    Variable,
+    Constant,
+    Property,
+    Field,
+    Namespace,
+    Module,
+    Test,
+    Heading,
+}
+
+impl OutlineKind {
+    /// The capture name suffix used in outline queries, e.g. `@kind.function`.
+    pub fn from_capture_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "function" => Self::Function,
+            "method" => Self::Method,
+            "constructor" => Self::Constructor,
+            "class" => Self::Class,
+            "struct" => Self::Struct,
+            "interface" => Self::Interface,
+            "trait" => Self::Trait,
+            "type" => Self::TypeAlias,
+            "enum" => Self::Enum,
+            "enum_member" => Self::EnumMember,
+            "variable" => Self::Variable,
+            "constant" => Self::Constant,
+            "property" => Self::Property,
+            "field" => Self::Field,
+            "namespace" => Self::Namespace,
+            "module" => Self::Module,
+            "test" => Self::Test,
+            "heading" => Self::Heading,
+            _ => return None,
+        })
+    }
+
+    /// Whether declarations nested in this item are local to it rather than part of the
+    /// document structure.
+    pub fn opens_local_scope(self) -> bool {
+        matches!(
+            self,
+            Self::Function | Self::Method | Self::Constructor | Self::Test
+        )
+    }
+
+    pub fn is_local_declaration(self) -> bool {
+        matches!(
+            self,
+            Self::Variable | Self::Constant | Self::Property | Self::Field
+        )
+    }
+
+    pub fn from_symbol_kind(kind: SymbolKind) -> Option<Self> {
+        Some(match kind {
+            SymbolKind::Function => Self::Function,
+            SymbolKind::Method => Self::Method,
+            SymbolKind::Constructor => Self::Constructor,
+            SymbolKind::Class => Self::Class,
+            SymbolKind::Struct => Self::Struct,
+            SymbolKind::Interface => Self::Interface,
+            SymbolKind::Enum => Self::Enum,
+            SymbolKind::EnumMember => Self::EnumMember,
+            SymbolKind::Variable => Self::Variable,
+            SymbolKind::Constant => Self::Constant,
+            SymbolKind::Property | SymbolKind::Key => Self::Property,
+            SymbolKind::Field => Self::Field,
+            SymbolKind::Namespace => Self::Namespace,
+            SymbolKind::Module | SymbolKind::Package => Self::Module,
+            SymbolKind::File
+            | SymbolKind::String
+            | SymbolKind::Number
+            | SymbolKind::Boolean
+            | SymbolKind::Array
+            | SymbolKind::Object
+            | SymbolKind::Null
+            | SymbolKind::Event
+            | SymbolKind::Operator
+            | SymbolKind::TypeParameter => return None,
+        })
+    }
+}
+
 impl SymbolKind {
     proto_mapping! {
         File = 1,

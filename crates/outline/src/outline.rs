@@ -10,12 +10,12 @@ use gpui::{
     ParentElement, Point, Rems, Render, Styled, StyledText, Task, TextStyle, WeakEntity, Window,
     div, rems,
 };
-use language::{OffsetRangeExt, Outline, OutlineItem, OutlineSearchEntry};
+use language::{OffsetRangeExt, Outline, OutlineItem, OutlineKind, OutlineSearchEntry};
 use picker::{MatchLocation, Picker, PickerDelegate, PreviewUpdate};
-use settings::Settings;
+use settings::{RegisterSetting, Settings};
 use theme::ActiveTheme;
 use theme_settings::ThemeSettings;
-use ui::{ListItem, ListItemSpacing, prelude::*};
+use ui::{ListItem, ListItemSpacing, prelude::*, utils::WithRemSize};
 use util::ResultExt;
 use workspace::{DismissDecision, ModalView};
 
@@ -88,6 +88,7 @@ fn outline_for_editor(
             .filter_map(|item| {
                 Some(OutlineItem {
                     depth: item.depth,
+                    kind: item.kind,
                     range: multibuffer.anchor_in_buffer(item.range.start)?
                         ..multibuffer.anchor_in_buffer(item.range.end)?,
                     selection_range: multibuffer.anchor_in_buffer(item.selection_range.start)?
@@ -448,6 +449,7 @@ impl PickerDelegate for OutlineViewDelegate {
         let entry = self.matches.get(ix)?;
         let outline_item = self.outline.items.get(entry.candidate_id())?;
         let ranges = entry.as_match().into_iter().flat_map(|m| m.ranges());
+        let outline_settings = OutlineSettings::get_global(cx);
 
         Some(
             ListItem::new(ix)
@@ -455,17 +457,124 @@ impl PickerDelegate for OutlineViewDelegate {
                 .spacing(ListItemSpacing::Sparse)
                 .toggle_state(selected)
                 .child(
-                    div()
-                        .text_ui(cx)
-                        .pl(rems(outline_item.depth as f32))
-                        .child(render_item(outline_item, ranges, cx)),
+                    WithRemSize::new(outline_settings.rem_size(cx)).child(
+                        div()
+                            .h(outline_settings.row_height())
+                            .flex()
+                            .items_center()
+                            .text_ui(cx)
+                            .pl(rems(outline_item.depth as f32))
+                            .child(render_item_with_icon(outline_item, ranges, cx)),
+                    ),
                 ),
         )
     }
 }
 
+/// Sizing shared by the outline panel and the outline modal.
+#[derive(Debug, Clone, Copy, PartialEq, RegisterSetting)]
+pub struct OutlineSettings {
+    /// Falls back to the UI font size.
+    pub font_size: Option<Pixels>,
+    /// Row height as a multiple of the font size.
+    pub line_height: f32,
+}
+
+impl Settings for OutlineSettings {
+    fn from_settings(content: &settings::SettingsContent) -> Self {
+        let panel = content.outline_panel.as_ref().unwrap();
+        Self {
+            font_size: panel.font_size.map(|font_size| px(font_size.0)),
+            line_height: panel.line_height.unwrap().max(1.0),
+        }
+    }
+}
+
+impl OutlineSettings {
+    /// The rem size for outline rows: their text and spacing are rem based, so sizing the rem
+    /// scales everything in a row together.
+    pub fn rem_size(&self, cx: &App) -> Pixels {
+        self.font_size
+            .unwrap_or_else(|| ThemeSettings::get_global(cx).ui_font_size(cx))
+    }
+
+    pub fn row_height(&self) -> Rems {
+        rems(self.line_height)
+    }
+}
+
+/// Renders an outline item as an icon for its kind followed by its name, falling back to the
+/// full text when the item's kind is unknown.
+pub fn render_item_with_icon<T>(
+    outline_item: &OutlineItem<T>,
+    match_ranges: impl IntoIterator<Item = Range<usize>>,
+    cx: &App,
+) -> AnyElement {
+    let Some(kind) = outline_item.kind else {
+        return render_item(outline_item, match_ranges, cx).into_any_element();
+    };
+    // The keywords captured as context ("async function", "const") come before the name; the
+    // icon conveys them instead.
+    let name_start = outline_item
+        .name_ranges
+        .first()
+        .map_or(0, |range| range.start)
+        .min(outline_item.text.len());
+    let shift = |range: &Range<usize>| -> Option<Range<usize>> {
+        let start = range.start.max(name_start);
+        (range.end > start).then(|| start - name_start..range.end - name_start)
+    };
+    let text: SharedString = outline_item.text[name_start..].to_string().into();
+    let highlight_ranges = outline_item
+        .highlight_ranges
+        .iter()
+        .filter_map(|(range, style)| Some((shift(range)?, *style)));
+    let match_ranges = match_ranges.into_iter().filter_map(|range| shift(&range));
+
+    h_flex()
+        .gap_1()
+        .child(
+            Icon::new(symbol_icon(kind))
+                .size(IconSize::Small)
+                .color(Color::Muted),
+        )
+        .child(render_text(text, highlight_ranges, match_ranges, cx))
+        .into_any_element()
+}
+
+pub fn symbol_icon(kind: OutlineKind) -> IconName {
+    match kind {
+        OutlineKind::Function => IconName::SymbolFunction,
+        OutlineKind::Method | OutlineKind::Constructor => IconName::SymbolMethod,
+        OutlineKind::Class | OutlineKind::Struct => IconName::Box,
+        OutlineKind::Interface | OutlineKind::Trait => IconName::SymbolInterface,
+        OutlineKind::TypeAlias => IconName::SymbolType,
+        OutlineKind::Enum => IconName::SymbolEnum,
+        OutlineKind::EnumMember => IconName::SymbolEnumMember,
+        OutlineKind::Variable | OutlineKind::Constant => IconName::SymbolVariable,
+        OutlineKind::Property | OutlineKind::Field => IconName::SymbolProperty,
+        OutlineKind::Namespace | OutlineKind::Module => IconName::SymbolNamespace,
+        OutlineKind::Test => IconName::SymbolTest,
+        OutlineKind::Heading => IconName::Hash,
+    }
+}
+
 pub fn render_item<T>(
     outline_item: &OutlineItem<T>,
+    match_ranges: impl IntoIterator<Item = Range<usize>>,
+    cx: &App,
+) -> StyledText {
+    render_text(
+        outline_item.text.clone(),
+        outline_item.highlight_ranges.iter().cloned(),
+        match_ranges,
+        cx,
+    )
+}
+
+fn render_text(
+    text: SharedString,
+    highlight_ranges: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
     match_ranges: impl IntoIterator<Item = Range<usize>>,
     cx: &App,
 ) -> StyledText {
@@ -492,12 +601,9 @@ pub fn render_item<T>(
         line_height: relative(1.),
         ..Default::default()
     };
-    let highlights = gpui::combine_highlights(
-        custom_highlights,
-        outline_item.highlight_ranges.iter().cloned(),
-    );
+    let highlights = gpui::combine_highlights(custom_highlights, highlight_ranges);
 
-    StyledText::new(outline_item.text.clone()).with_default_highlights(&text_style, highlights)
+    StyledText::new(text).with_default_highlights(&text_style, highlights)
 }
 
 #[cfg(test)]

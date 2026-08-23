@@ -3201,6 +3201,29 @@ Example:
 }
 ```
 
+### Hidden Outline Symbols
+
+- Description: Symbols to leave out of the outline panel and the outline modal. Hiding a symbol also hides everything nested in it.
+- Setting: `hidden_outline_symbols`
+- Default: `["local"]`
+
+**Options**
+
+- `"local"`: variables, constants, properties and fields declared inside a function, method or test
+- a symbol kind: `"function"`, `"method"`, `"constructor"`, `"class"`, `"struct"`, `"interface"`, `"trait"`, `"type"`, `"enum"`, `"enum_member"`, `"variable"`, `"constant"`, `"property"`, `"field"`, `"namespace"`, `"module"`, `"test"`, `"heading"`
+
+Example, to show every symbol the way the outline did before:
+
+```json [settings]
+{
+  "languages": {
+    "TypeScript": {
+      "hidden_outline_symbols": []
+    }
+  }
+}
+```
+
 ## Language Models
 
 - Description: Configuration for language model providers
@@ -5800,7 +5823,7 @@ You can define these in user or project settings; project settings are merged on
 }
 ```
 
-`font_size` sets the font size of the outline entries in pixels; `null` follows the UI font size. `line_height` is the height of an entry as a multiple of the font size.
+`font_size` sets the font size of the outline entries in pixels, in the outline panel and in the outline modal; `null` follows the UI font size. `line_height` is the height of an entry as a multiple of the font size.
 
 ## Calls
 
