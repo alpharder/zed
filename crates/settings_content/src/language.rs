@@ -35,7 +35,7 @@ pub struct ModifiersContent {
 }
 
 #[with_fallible_options]
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, JsonSchema)]
 pub struct AllLanguageSettingsContent {
     /// The edit prediction settings.
     pub edit_predictions: Option<EditPredictionSettingsContent>,
@@ -49,6 +49,12 @@ pub struct AllLanguageSettingsContent {
     /// with languages.
     pub file_types: Option<FileTypeMap>,
 }
+
+crate::fallible_options::flattened_deserialize!(AllLanguageSettingsContent {
+    sections: { defaults },
+    options: { edit_predictions, file_types },
+    defaults: { languages },
+});
 
 impl merge_from::MergeFrom for AllLanguageSettingsContent {
     fn merge_from(&mut self, other: &Self) {

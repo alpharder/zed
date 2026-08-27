@@ -1410,6 +1410,7 @@ or
   "tab_bar": {
     "show": true,
     "show_nav_history_buttons": true,
+    "show_reveal_in_project_panel_button": false,
     "show_tab_bar_buttons": true
   }
 }
@@ -1430,6 +1431,16 @@ or
 - Description: Whether or not to show the navigation history buttons.
 - Setting: `show_nav_history_buttons`
 - Default: `true`
+
+**Options**
+
+`boolean` values
+
+### Reveal In Project Panel Button
+
+- Description: Whether or not to show a button that reveals the active file in the project panel, next to the navigation history buttons.
+- Setting: `show_reveal_in_project_panel_button`
+- Default: `false`
 
 **Options**
 
@@ -3604,6 +3615,14 @@ Examples:
 
 `boolean` values
 
+## Call Hierarchy
+
+### Modal Max Width
+
+- Description: Max-width of the call hierarchy modal. It can take one of these values: `small`, `medium`, `large`, `xlarge`, and `full`.
+- Setting: `modal_max_width`
+- Default: `medium`
+
 ## File Finder
 
 ### File Icons
@@ -3928,7 +3947,8 @@ Non-negative `integer` values
     "case_sensitive": false,
     "include_ignored": false,
     "regex": false,
-    "center_on_match": false
+    "center_on_match": false,
+    "search_on_type": true
   }
 }
 ```
@@ -3970,6 +3990,12 @@ Non-negative `integer` values
 - Description: Whether to center the cursor on each search match when navigating.
 - Setting: `center_on_match`
 - Default: `false`
+
+### Search On Type
+
+- Description: Start searching as you type in project search, without pressing Enter.
+- Setting: `search_on_type`
+- Default: `true`
 
 ## Search Wrap
 
@@ -5279,7 +5305,7 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
     "dock": "right",
     "entry_spacing": "comfortable",
     "file_icons": true,
-    "folder_icons": true,
+    "folder_indicator": "icon",
     "git_status": true,
     "indent_size": 20,
     "auto_reveal_entries": true,
@@ -5819,7 +5845,7 @@ You can define these in user or project settings; project settings are merged on
     "default_width": 300,
     "dock": "left",
     "file_icons": true,
-    "folder_icons": true,
+    "folder_indicator": "icon",
     "git_status": true,
     "indent_size": 20,
     "auto_reveal_entries": true,

@@ -453,7 +453,7 @@ impl PickerDelegate for OutlineViewDelegate {
     fn dismissed(&mut self, window: &mut Window, cx: &mut Context<Picker<OutlineViewDelegate>>) {
         self.outline_view
             .update(cx, |_, cx| cx.emit(DismissEvent))
-            .log_err();
+            .ok();
         self.restore_active_editor(window, cx);
     }
 

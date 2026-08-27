@@ -17,6 +17,7 @@ use crate::{
 use anyhow::Result;
 use collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use futures::{StreamExt, stream::FuturesUnordered};
+use git::{CopyFilePermalink, OpenFilePermalink};
 use gpui::{
     Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Div,
     DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
@@ -3289,8 +3290,19 @@ impl Pane {
                             let parent_abs_path = entry_abs_path
                                 .as_deref()
                                 .and_then(|abs_path| Some(abs_path.parent()?.to_path_buf()));
+                            let has_git_repo = project_path.as_ref().is_some_and(|project_path| {
+                                pane.read(cx).project.upgrade().is_some_and(|project| {
+                                    project
+                                        .read(cx)
+                                        .git_store()
+                                        .read(cx)
+                                        .repository_and_path_for_project_path(project_path, cx)
+                                        .is_some()
+                                })
+                            });
                             let relative_path = project_path
-                                .map(|project_path| project_path.path)
+                                .as_ref()
+                                .map(|project_path| project_path.path.clone())
                                 .filter(|_| has_relative_path);
 
                             let visible_in_project_panel = relative_path.is_some()
@@ -3334,6 +3346,53 @@ impl Pane {
                                                 relative_path.display(path_style).to_string(),
                                             ));
                                         }),
+                                    )
+                                })
+                                .when(has_git_repo, |menu| {
+                                    menu.separator().when_some(
+                                        project_path.clone(),
+                                        |menu, project_path| {
+                                            menu.entry(
+                                                "Open File Permalink",
+                                                Some(OpenFilePermalink.boxed_clone()),
+                                                window.handler_for(&pane, {
+                                                    let project_path = project_path.clone();
+                                                    move |pane, window, cx| {
+                                                        let Some(project) = pane.project.upgrade()
+                                                        else {
+                                                            return;
+                                                        };
+                                                        crate::open_file_permalink(
+                                                            project,
+                                                            project_path.clone(),
+                                                            pane.workspace.clone(),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    }
+                                                }),
+                                            )
+                                            .entry(
+                                                "Copy File Permalink",
+                                                Some(CopyFilePermalink.boxed_clone()),
+                                                window.handler_for(
+                                                    &pane,
+                                                    move |pane, window, cx| {
+                                                        let Some(project) = pane.project.upgrade()
+                                                        else {
+                                                            return;
+                                                        };
+                                                        crate::copy_file_permalink(
+                                                            project,
+                                                            project_path.clone(),
+                                                            pane.workspace.clone(),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
+                                                ),
+                                            )
+                                        },
                                     )
                                 })
                                 .when(is_local, |menu| {
@@ -3458,6 +3517,38 @@ impl Pane {
                 }
             });
 
+        let reveal_in_project_panel = TabBarSettings::get_global(cx)
+            .show_reveal_in_project_panel_button
+            .then(|| {
+                let has_project_entry = self
+                    .active_item()
+                    .is_some_and(|item| !item.project_entry_ids(cx).is_empty());
+                IconButton::new("reveal_in_project_panel", IconName::Crosshair)
+                    .icon_size(IconSize::Small)
+                    .on_click({
+                        let focus_handle = focus_handle.clone();
+                        move |_, window, cx| {
+                            focus_handle.dispatch_action(
+                                &RevealInProjectPanel::default(),
+                                window,
+                                cx,
+                            );
+                        }
+                    })
+                    .disabled(!has_project_entry)
+                    .tooltip({
+                        let focus_handle = focus_handle.clone();
+                        move |window, cx| {
+                            Tooltip::for_action_in(
+                                "Reveal In Project Panel",
+                                &RevealInProjectPanel::default(),
+                                &window.focused(cx).unwrap_or_else(|| focus_handle.clone()),
+                                cx,
+                            )
+                        }
+                    })
+            });
+
         let mut tab_items = self
             .items
             .iter()
@@ -3492,6 +3583,7 @@ impl Pane {
                 tab_count,
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3502,6 +3594,7 @@ impl Pane {
                 tab_count,
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3513,6 +3606,7 @@ impl Pane {
         tab_bar: TabBar,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> TabBar {
@@ -3525,6 +3619,7 @@ impl Pane {
                         .start_child(navigate_forward)
                 },
             )
+            .when_some(reveal_in_project_panel, TabBar::start_child)
             .map(|tab_bar| {
                 if self.show_tab_bar_buttons {
                     let render_tab_buttons = self.render_tab_bar_buttons.clone();
@@ -3545,6 +3640,7 @@ impl Pane {
         tab_count: usize,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> AnyElement {
@@ -3553,6 +3649,7 @@ impl Pane {
                 TabBar::new("tab_bar"),
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3583,6 +3680,7 @@ impl Pane {
         tab_count: usize,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> AnyElement {
@@ -3591,6 +3689,7 @@ impl Pane {
                 TabBar::new("pinned_tab_bar"),
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
