@@ -800,6 +800,7 @@ impl VsCodeSettings {
                 _ => None,
             }),
             show_nav_history_buttons: None,
+            show_reveal_in_project_panel_button: None,
             show_tab_bar_buttons: self
                 .read_str("workbench.editor.editorActionsLocation")
                 .and_then(|str| if str == "hidden" { Some(false) } else { None }),

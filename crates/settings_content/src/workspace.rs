@@ -513,6 +513,10 @@ pub struct TabBarSettingsContent {
     ///
     /// Default: true
     pub show_nav_history_buttons: Option<bool>,
+    /// Whether or not to show a button that reveals the active file in the project panel.
+    ///
+    /// Default: false
+    pub show_reveal_in_project_panel_button: Option<bool>,
     /// Whether or not to show the tab bar buttons.
     ///
     /// Default: true

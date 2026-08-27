@@ -4481,7 +4481,7 @@ fn window_and_layout_page() -> SettingsPage {
         ]
     }
 
-    fn tab_bar_section() -> [SettingsPageItem; 9] {
+    fn tab_bar_section() -> [SettingsPageItem; 10] {
         [
             SettingsPageItem::SectionHeader("Tab Bar"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -4579,6 +4579,29 @@ fn window_and_layout_page() -> SettingsPage {
                             .tab_bar
                             .get_or_insert_default()
                             .show_nav_history_buttons = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Reveal In Project Panel Button",
+                description: "Show a button that reveals the active file in the project panel.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("tab_bar.show_reveal_in_project_panel_button"),
+                    pick: |settings_content| {
+                        settings_content
+                            .tab_bar
+                            .as_ref()?
+                            .show_reveal_in_project_panel_button
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .tab_bar
+                            .get_or_insert_default()
+                            .show_reveal_in_project_panel_button = value;
                     },
                 }),
                 metadata: None,

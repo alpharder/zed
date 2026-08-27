@@ -1410,6 +1410,7 @@ or
   "tab_bar": {
     "show": true,
     "show_nav_history_buttons": true,
+    "show_reveal_in_project_panel_button": false,
     "show_tab_bar_buttons": true
   }
 }
@@ -1430,6 +1431,16 @@ or
 - Description: Whether or not to show the navigation history buttons.
 - Setting: `show_nav_history_buttons`
 - Default: `true`
+
+**Options**
+
+`boolean` values
+
+### Reveal In Project Panel Button
+
+- Description: Whether or not to show a button that reveals the active file in the project panel, next to the navigation history buttons.
+- Setting: `show_reveal_in_project_panel_button`
+- Default: `false`
 
 **Options**
 

@@ -3517,6 +3517,38 @@ impl Pane {
                 }
             });
 
+        let reveal_in_project_panel = TabBarSettings::get_global(cx)
+            .show_reveal_in_project_panel_button
+            .then(|| {
+                let has_project_entry = self
+                    .active_item()
+                    .is_some_and(|item| !item.project_entry_ids(cx).is_empty());
+                IconButton::new("reveal_in_project_panel", IconName::Crosshair)
+                    .icon_size(IconSize::Small)
+                    .on_click({
+                        let focus_handle = focus_handle.clone();
+                        move |_, window, cx| {
+                            focus_handle.dispatch_action(
+                                &RevealInProjectPanel::default(),
+                                window,
+                                cx,
+                            );
+                        }
+                    })
+                    .disabled(!has_project_entry)
+                    .tooltip({
+                        let focus_handle = focus_handle.clone();
+                        move |window, cx| {
+                            Tooltip::for_action_in(
+                                "Reveal In Project Panel",
+                                &RevealInProjectPanel::default(),
+                                &window.focused(cx).unwrap_or_else(|| focus_handle.clone()),
+                                cx,
+                            )
+                        }
+                    })
+            });
+
         let mut tab_items = self
             .items
             .iter()
@@ -3551,6 +3583,7 @@ impl Pane {
                 tab_count,
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3561,6 +3594,7 @@ impl Pane {
                 tab_count,
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3572,6 +3606,7 @@ impl Pane {
         tab_bar: TabBar,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> TabBar {
@@ -3584,6 +3619,7 @@ impl Pane {
                         .start_child(navigate_forward)
                 },
             )
+            .when_some(reveal_in_project_panel, TabBar::start_child)
             .map(|tab_bar| {
                 if self.show_tab_bar_buttons {
                     let render_tab_buttons = self.render_tab_bar_buttons.clone();
@@ -3604,6 +3640,7 @@ impl Pane {
         tab_count: usize,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> AnyElement {
@@ -3612,6 +3649,7 @@ impl Pane {
                 TabBar::new("tab_bar"),
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
@@ -3642,6 +3680,7 @@ impl Pane {
         tab_count: usize,
         navigate_backward: IconButton,
         navigate_forward: IconButton,
+        reveal_in_project_panel: Option<IconButton>,
         window: &mut Window,
         cx: &mut Context<Pane>,
     ) -> AnyElement {
@@ -3650,6 +3689,7 @@ impl Pane {
                 TabBar::new("pinned_tab_bar"),
                 navigate_backward,
                 navigate_forward,
+                reveal_in_project_panel,
                 window,
                 cx,
             )
