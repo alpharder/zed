@@ -1,6 +1,6 @@
 use core::num;
 
-use gpui::App;
+use gpui::{App, Pixels, px};
 use language::CursorShape;
 use project::project_settings::DiagnosticSeverity;
 pub use settings::{
@@ -12,6 +12,9 @@ pub use settings::{
 };
 use settings::{RegisterSetting, RelativeLineNumbers, Settings};
 use ui::scrollbars::ShowScrollbar;
+
+/// Wider than this the scrollbar stops being a scrollbar, and the editor loses too much width.
+const MAX_SCROLLBAR_WIDTH: f32 = 64.;
 
 /// Imports from the VSCode settings at
 /// https://code.visualstudio.com/docs/reference/default-settings
@@ -105,6 +108,7 @@ pub struct Toolbar {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Scrollbar {
     pub show: ShowScrollbar,
+    pub width: Pixels,
     pub git_diff: bool,
     pub selected_text: bool,
     pub selected_symbol: bool,
@@ -238,6 +242,7 @@ impl Settings for EditorSettings {
             },
             scrollbar: Scrollbar {
                 show: scrollbar.show.map(ui_scrollbar_settings_from_raw).unwrap(),
+                width: px(scrollbar.width.unwrap().0.clamp(0., MAX_SCROLLBAR_WIDTH)),
                 git_diff: scrollbar.git_diff.unwrap()
                     && content
                         .git
@@ -354,5 +359,44 @@ pub fn ui_scrollbar_settings_from_raw(
         settings::ShowScrollbar::System => ShowScrollbar::System,
         settings::ShowScrollbar::Always => ShowScrollbar::Always,
         settings::ShowScrollbar::Never => ShowScrollbar::Never,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use gpui::UpdateGlobal as _;
+    use settings::SettingsStore;
+
+    #[gpui::test]
+    fn test_scrollbar_width_setting(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+            EditorSettings::register(cx);
+
+            assert_eq!(EditorSettings::get_global(cx).scrollbar.width, px(15.));
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.editor.scrollbar.get_or_insert_default().width =
+                        Some(settings::PixelSetting(8.));
+                });
+            });
+            assert_eq!(EditorSettings::get_global(cx).scrollbar.width, px(8.));
+
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.editor.scrollbar.get_or_insert_default().width =
+                        Some(settings::PixelSetting(1000.));
+                });
+            });
+            assert_eq!(
+                EditorSettings::get_global(cx).scrollbar.width,
+                px(MAX_SCROLLBAR_WIDTH),
+                "an unreasonable width is clamped so the editor keeps its text area"
+            );
+        });
     }
 }

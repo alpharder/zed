@@ -611,6 +611,10 @@
     // 4. Never show the scrollbar:
     //    "never"
     "show": "auto",
+    // The width of the scrollbar in the editor, in pixels.
+    // Set to 0 to hide the scrollbar while keeping its indicators
+    // in the reserved space.
+    "width": 15,
     // Whether to show cursor positions in the scrollbar.
     "cursors": true,
     // Whether to show git diff indicators in the scrollbar.

@@ -981,6 +981,7 @@ List of `string` values
 {
   "scrollbar": {
     "show": "auto",
+    "width": 15,
     "cursors": true,
     "git_diff": true,
     "search_results": true,
@@ -1039,6 +1040,24 @@ List of `string` values
 {
   "scrollbar": {
     "show": "never"
+  }
+}
+```
+
+### Width
+
+- Description: Width of the editor scrollbar, in pixels. Set it to `0` to hide the scrollbar while the editor keeps its indicators in the reserved space.
+- Setting: `width`
+- Default: `15`
+
+**Options**
+
+`float` values between `0` and `64`
+
+```json [settings]
+{
+  "scrollbar": {
+    "width": 8
   }
 }
 ```

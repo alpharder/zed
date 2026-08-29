@@ -399,6 +399,11 @@ pub struct ScrollbarContent {
     ///
     /// Default: auto
     pub show: Option<ShowScrollbar>,
+    /// The width of the scrollbar in the editor, in pixels. Set to 0 to hide the scrollbar
+    /// while keeping its indicators in the reserved space.
+    ///
+    /// Default: 15
+    pub width: Option<crate::PixelSetting>,
     /// Whether to show git diff indicators in the scrollbar.
     ///
     /// Default: true
