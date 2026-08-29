@@ -981,6 +981,7 @@ List of `string` values
 {
   "scrollbar": {
     "show": "auto",
+    "width": 15,
     "cursors": true,
     "git_diff": true,
     "search_results": true,
@@ -1039,6 +1040,24 @@ List of `string` values
 {
   "scrollbar": {
     "show": "never"
+  }
+}
+```
+
+### Width
+
+- Description: Width of the editor scrollbar, in pixels. Set it to `0` to hide the scrollbar while the editor keeps its indicators in the reserved space.
+- Setting: `width`
+- Default: `15`
+
+**Options**
+
+`float` values between `0` and `64`
+
+```json [settings]
+{
+  "scrollbar": {
+    "width": 8
   }
 }
 ```
@@ -3140,6 +3159,16 @@ Unspecified values have a `false` value, hints won't be toggled if all the modif
 **Options**
 
 - `enabled`: Whether to enable automatic JSX tag closing
+
+## Language Detection
+
+- Description: Whether to automatically detect the language of an untitled buffer from its contents. Languages explicitly selected from the language selector are not changed.
+- Setting: `language_detection`
+- Default: `true`
+
+**Options**
+
+`boolean` values
 
 ## Languages
 

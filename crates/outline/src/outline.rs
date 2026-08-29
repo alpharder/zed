@@ -7,16 +7,13 @@ use editor::{MultiBufferOffset, RowHighlightOptions, SelectionEffects};
 use fuzzy_nucleo::StringMatch;
 use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle,
-    ParentElement, Point, Rems, Render, Styled, StyledText, Task, TextStyle, WeakEntity, Window,
-    div, rems,
+    ParentElement, Point, Rems, Render, Styled, StyledText, Task, WeakEntity, Window, div, rems,
 };
 use language::{OffsetRangeExt, Outline, OutlineItem, OutlineKind, OutlineSearchEntry};
 use picker::{MatchLocation, Picker, PickerDelegate, PreviewUpdate};
 use settings::{RegisterSetting, Settings};
 use theme::ActiveTheme;
-use theme_settings::ThemeSettings;
-use ui::{ListItem, ListItemSpacing, prelude::*, utils::WithRemSize};
-use util::ResultExt;
+use ui::{ListItem, ListItemSpacing, prelude::*, utils::WithRemSize, utils::buffer_text_style};
 use workspace::{DismissDecision, ModalView};
 
 pub fn init(cx: &mut App) {
@@ -226,19 +223,6 @@ impl OutlineViewDelegate {
         }
     }
 
-    /// The outline can be opened from an item that only acts as an editor, such as the markdown
-    /// preview; focus goes back to that item rather than to the editor it wraps.
-    fn navigation_focus_handle(&self, cx: &App) -> FocusHandle {
-        let editor = &self.active_editor;
-        editor
-            .read(cx)
-            .workspace()
-            .and_then(|workspace| workspace.read(cx).active_item(cx))
-            .filter(|item| item.act_as::<Editor>(cx).as_ref() == Some(editor))
-            .map(|item| item.item_focus_handle(cx))
-            .unwrap_or_else(|| editor.focus_handle(cx))
-    }
-
     fn restore_active_editor(&mut self, window: &mut Window, cx: &mut App) {
         self.active_editor.update(cx, |editor, cx| {
             editor.clear_row_highlights::<OutlineRowHighlights>();
@@ -426,7 +410,7 @@ impl PickerDelegate for OutlineViewDelegate {
         self.prev_scroll_position.take();
         self.set_selected_index(self.selected_match_index, true, cx);
 
-        let navigated = self.active_editor.update(cx, |active_editor, cx| {
+        self.active_editor.update(cx, |active_editor, cx| {
             let highlight = active_editor
                 .highlighted_rows::<OutlineRowHighlights>(cx)
                 .next();
@@ -438,14 +422,9 @@ impl PickerDelegate for OutlineViewDelegate {
                     |s| s.select_ranges([rows.start..rows.start]),
                 );
                 active_editor.clear_row_highlights::<OutlineRowHighlights>();
-                true
-            } else {
-                false
+                window.focus(&active_editor.focus_handle(cx), cx);
             }
         });
-        if navigated {
-            window.focus(&self.navigation_focus_handle(cx), cx);
-        }
 
         self.dismissed(window, cx);
     }
@@ -513,7 +492,7 @@ impl OutlineSettings {
     /// scales everything in a row together.
     pub fn rem_size(&self, cx: &App) -> Pixels {
         self.font_size
-            .unwrap_or_else(|| ThemeSettings::get_global(cx).ui_font_size(cx))
+            .unwrap_or_else(|| theme::theme_settings(cx).ui_font_size(cx))
     }
 
     pub fn row_height(&self) -> Rems {
@@ -577,11 +556,11 @@ pub fn symbol_icon(kind: OutlineKind) -> IconName {
     }
 }
 
-pub fn render_item<T>(
+pub fn render_item<T, M: IntoIterator<Item = Range<usize>>>(
     outline_item: &OutlineItem<T>,
-    match_ranges: impl IntoIterator<Item = Range<usize>>,
+    match_ranges: M,
     cx: &App,
-) -> StyledText {
+) -> impl IntoElement + use<T, M> {
     render_text(
         outline_item.text.clone(),
         outline_item.highlight_ranges.iter().cloned(),
@@ -595,7 +574,7 @@ fn render_text(
     highlight_ranges: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
     match_ranges: impl IntoIterator<Item = Range<usize>>,
     cx: &App,
-) -> StyledText {
+) -> Div {
     let highlight_style = HighlightStyle {
         background_color: Some(cx.theme().colors().text_accent.alpha(0.3)),
         ..Default::default()
@@ -604,24 +583,13 @@ fn render_text(
         .into_iter()
         .map(|range| (range, highlight_style));
 
-    let settings = ThemeSettings::get_global(cx);
-
-    // TODO: We probably shouldn't need to build a whole new text style here
-    // but I'm not sure how to get the current one and modify it.
-    // Before this change TextStyle::default() was used here, which was giving us the wrong font and text color.
-    let text_style = TextStyle {
-        color: cx.theme().colors().text,
-        font_family: settings.buffer_font.family.clone(),
-        font_features: settings.buffer_font.features.clone(),
-        font_fallbacks: settings.buffer_font.fallbacks.clone(),
-        font_size: settings.buffer_font_size(cx).into(),
-        font_weight: settings.buffer_font.weight,
-        line_height: relative(1.),
-        ..Default::default()
-    };
+    let text_style = buffer_text_style(cx);
+    let buffer_font_size = text_style.font_size;
     let highlights = gpui::combine_highlights(custom_highlights, highlight_ranges);
 
-    StyledText::new(text).with_default_highlights(&text_style, highlights)
+    div()
+        .text_size(buffer_font_size)
+        .child(StyledText::new(text).with_default_highlights(&text_style, highlights))
 }
 
 #[cfg(test)]

@@ -169,6 +169,12 @@ pub struct EditorSettingsContent {
     /// Default: false
     pub auto_signature_help: Option<bool>,
 
+    /// Whether to automatically detect the language of an untitled buffer from its contents.
+    /// Languages explicitly selected from the language selector are not changed.
+    ///
+    /// Default: true
+    pub language_detection: Option<bool>,
+
     /// Whether to show the signature help pop-up after completions or bracket pairs inserted.
     ///
     /// Default: false
@@ -393,6 +399,11 @@ pub struct ScrollbarContent {
     ///
     /// Default: auto
     pub show: Option<ShowScrollbar>,
+    /// The width of the scrollbar in the editor, in pixels. Set to 0 to hide the scrollbar
+    /// while keeping its indicators in the reserved space.
+    ///
+    /// Default: 15
+    pub width: Option<crate::PixelSetting>,
     /// Whether to show git diff indicators in the scrollbar.
     ///
     /// Default: true
