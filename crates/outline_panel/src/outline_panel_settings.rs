@@ -21,6 +21,7 @@ pub struct OutlinePanelSettings {
     /// Falls back to the UI font size when unset.
     pub font_size: Option<Pixels>,
     pub line_height: f32,
+    pub multi_buffer_hide_symbols: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -81,6 +82,7 @@ impl Settings for OutlinePanelSettings {
             expand_outlines_with_depth: panel.expand_outlines_with_depth.unwrap(),
             font_size: panel.font_size.map(|font_size| px(font_size.0)),
             line_height: panel.line_height.unwrap().max(1.0),
+            multi_buffer_hide_symbols: panel.multi_buffer_hide_symbols.unwrap(),
         }
     }
 }

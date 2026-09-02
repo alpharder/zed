@@ -845,6 +845,11 @@ impl<'a> TabStopCursor<'a> {
             })
         }) {
             let chunk_len = chunk.text.len() as u32;
+            // A fold whose placeholder is empty produces a chunk with no text; it holds neither
+            // characters nor tab stops, so the search continues with the next chunk.
+            if chunk_len == 0 {
+                continue;
+            }
 
             if chunk.tabs == 0 {
                 let chunk_remaining = chunk_len - chunk_position;

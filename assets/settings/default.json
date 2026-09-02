@@ -192,9 +192,10 @@
   "reveal_if_open": false,
   // Whether to automatically close files that have been deleted on disk.
   "close_on_file_delete": false,
-  // Whether toggling a panel (e.g. with its keyboard shortcut) also closes
-  // the panel when it is already focused, instead of just moving focus back
-  // to the editor.
+  // Whether invoking a panel's ToggleFocus action while the panel is already
+  // focused closes the panel, instead of just moving focus back to the
+  // editor. This only applies to a panel's focus-toggle action, not to its
+  // regular visibility-toggle action.
   "close_panel_on_toggle": false,
   // Relative size of the drop target in the editor that will open dropped file as a split pane (0-0.5)
   // E.g. 0.25 == If you drop onto the top/bottom quarter of the pane a new vertical split will be used
@@ -254,6 +255,10 @@
   // When set to false, Zed will use its built-in prompts. Note that on Linux,
   // this option is ignored and Zed will always use the built-in prompts.
   "use_system_prompts": true,
+  // Whether to render the Markdown that comments are written in: the markers
+  // are concealed and the text they mark is styled, while the comment that
+  // holds the cursor stays as it is.
+  "render_markdown_in_comments": false,
   // Whether the cursor blinks in the editor.
   "cursor_blink": true,
   // Cursor shape for the default editor.
@@ -1020,6 +1025,11 @@
     //
     // Default: 1.5
     "line_height": 1.5,
+    // Whether to hide symbols, excerpts and search matches in the outline panel
+    // when a multi-buffer view (e.g. a diff or search results) is active,
+    // showing only files and directories.
+    // Does not affect single-file views.
+    "multi_buffer_hide_symbols": false,
   },
   "collaboration_panel": {
     // Whether to show the collaboration panel button in the status bar.

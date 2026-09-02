@@ -502,6 +502,16 @@ When enabled, this setting will automatically close tabs for files that have bee
 
 > Note: Dirty files (files with unsaved changes) will not be automatically closed even when this setting is enabled, ensuring you don't lose unsaved work.
 
+## Close Panel on Toggle
+
+- Description: Whether invoking a panel's `ToggleFocus` action while the panel is already focused closes the panel, instead of just moving focus back to the editor. This only applies to a panel's focus-toggle action, not to its regular visibility-toggle action.
+- Setting: `close_panel_on_toggle`
+- Default: `false`
+
+**Options**
+
+`boolean` values
+
 ## Code Lens
 
 - Description: Whether and how to display code lenses from language servers. Code lenses show contextual information such as reference counts, implementations, and other metadata provided by the language server.
@@ -797,6 +807,16 @@ List of `string` values
 - Description: Whether the text selection should have rounded corners.
 - Setting: `rounded_selection`
 - Default: `true`
+
+## Render Markdown In Comments
+
+- Description: Whether to render the Markdown that comments are written in. The delimiters of a comment (`//`, `/**`, `*`) stay as they are; the inline markers of the text are folded away and the text they mark gets its style, so `**bold**`, `*italic*`, `` `code` ``, `[links](url)` and `# headings` read as Markdown. Markup nests: ``**_`term`_**`` is bold, italic and code at once. The comment that holds the cursor keeps its markers, so it reads as its own source while it is edited. The Editor Controls menu holds the same switch for one editor.
+- Setting: `render_markdown_in_comments`
+- Default: `false`
+
+**Options**
+
+`boolean` values
 
 ## Cursor Blink
 
@@ -5887,7 +5907,8 @@ You can define these in user or project settings; project settings are merged on
     },
     "expand_outlines_with_depth": 100,
     "font_size": null,
-    "line_height": 1.5
+    "line_height": 1.5,
+    "multi_buffer_hide_symbols": false
   }
 }
 ```

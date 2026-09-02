@@ -120,6 +120,7 @@ impl Render for QuickActionBar {
         let selection_menu_enabled = editor_value.selection_menu_enabled(cx);
         let inlay_hints_enabled = editor_value.inlay_hints_enabled();
         let inline_values_enabled = editor_value.inline_values_enabled();
+        let markdown_comments_enabled = editor_value.markdown_comments_enabled(cx);
         let semantic_highlights_enabled = editor_value.semantic_highlights_enabled();
         let code_lens_enabled = editor_value.code_lens_enabled();
         let is_full = editor_value.mode().is_full();
@@ -362,6 +363,27 @@ impl Render for QuickActionBar {
                                                 .update(cx, |editor, cx| {
                                                     editor.toggle_inlay_hints(
                                                         &editor::actions::ToggleInlayHints,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                })
+                                                .ok();
+                                        }
+                                    },
+                                );
+
+                                menu = menu.toggleable_entry(
+                                    "Markdown Comments",
+                                    markdown_comments_enabled,
+                                    IconPosition::Start,
+                                    Some(editor::actions::ToggleMarkdownComments.boxed_clone()),
+                                    {
+                                        let editor = editor.clone();
+                                        move |window, cx| {
+                                            editor
+                                                .update(cx, |editor, cx| {
+                                                    editor.toggle_markdown_comments(
+                                                        &editor::actions::ToggleMarkdownComments,
                                                         window,
                                                         cx,
                                                     );

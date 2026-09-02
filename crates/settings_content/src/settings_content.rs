@@ -1231,6 +1231,13 @@ pub struct OutlinePanelSettingsContent {
     ///
     /// Default: 1.5
     pub line_height: Option<f32>,
+    /// Whether to hide symbols, excerpts and search matches in the outline panel
+    /// when a multi-buffer view (e.g. a diff or search results) is active,
+    /// showing only files and directories.
+    /// Does not affect single-file views.
+    ///
+    /// Default: false
+    pub multi_buffer_hide_symbols: Option<bool>,
 }
 
 #[derive(
