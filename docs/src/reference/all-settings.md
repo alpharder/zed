@@ -808,6 +808,16 @@ List of `string` values
 - Setting: `rounded_selection`
 - Default: `true`
 
+## Render Markdown In Comments
+
+- Description: Whether to render the Markdown that comments are written in. The delimiters of a comment (`//`, `/**`, `*`) stay as they are; the inline markers of the text are folded away and the text they mark gets its style, so `**bold**`, `*italic*`, `` `code` ``, `[links](url)` and `# headings` read as Markdown. Markup nests: ``**_`term`_**`` is bold, italic and code at once. The comment that holds the cursor keeps its markers, so it reads as its own source while it is edited. The Editor Controls menu holds the same switch for one editor.
+- Setting: `render_markdown_in_comments`
+- Default: `false`
+
+**Options**
+
+`boolean` values
+
 ## Cursor Blink
 
 - Description: Whether or not the cursor blinks.

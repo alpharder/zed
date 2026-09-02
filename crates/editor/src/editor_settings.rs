@@ -17,6 +17,7 @@ use ui::scrollbars::ShowScrollbar;
 /// https://code.visualstudio.com/docs/reference/default-settings
 #[derive(Clone, RegisterSetting)]
 pub struct EditorSettings {
+    pub render_markdown_in_comments: bool,
     pub cursor_blink: bool,
     pub cursor_shape: Option<CursorShape>,
     pub current_line_highlight: CurrentLineHighlight,
@@ -219,6 +220,7 @@ impl Settings for EditorSettings {
         let sticky_scroll = editor.sticky_scroll.unwrap();
         let file_diff = content.git.as_ref().unwrap().file_diff.unwrap();
         Self {
+            render_markdown_in_comments: editor.render_markdown_in_comments.unwrap(),
             cursor_blink: editor.cursor_blink.unwrap(),
             cursor_shape: editor.cursor_shape.map(Into::into),
             current_line_highlight: editor.current_line_highlight.unwrap(),

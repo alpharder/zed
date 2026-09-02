@@ -1315,7 +1315,7 @@ fn appearance_page() -> SettingsPage {
         ]
     }
 
-    fn cursor_section() -> [SettingsPageItem; 6] {
+    fn cursor_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader("Cursor"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -1327,6 +1327,22 @@ fn appearance_page() -> SettingsPage {
                     pick: |settings_content| settings_content.editor.multi_cursor_modifier.as_ref(),
                     write: |settings_content, value, _| {
                         settings_content.editor.multi_cursor_modifier = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Render Markdown In Comments",
+                description: "Render the Markdown that comments are written in: the markers are folded away and the text they mark is styled, while the comment that holds the cursor stays as it is.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("render_markdown_in_comments"),
+                    pick: |settings_content| {
+                        settings_content.editor.render_markdown_in_comments.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content.editor.render_markdown_in_comments = value;
                     },
                 }),
                 metadata: None,

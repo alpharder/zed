@@ -821,6 +821,10 @@ impl Editor {
         };
         let inmemory_folds = display_snapshot
             .folds_in_range(MultiBufferOffset(0)..display_snapshot.buffer_snapshot().len())
+            // A fold with a type tag belongs to a feature rather than to the user, and the feature
+            // creates it again on its own. Restoring it as a fold of the user would leave the
+            // ellipsis of a normal fold behind, in a file the feature is not even active in.
+            .filter(|fold| fold.placeholder.type_tag.is_none())
             .map(|fold| {
                 let start = fold.range.start.text_anchor_in(buffer_snapshot);
                 let end = fold.range.end.text_anchor_in(buffer_snapshot);
@@ -847,6 +851,7 @@ impl Editor {
         const FINGERPRINT_LEN: usize = 32;
         let db_folds = display_snapshot
             .folds_in_range(MultiBufferOffset(0)..display_snapshot.buffer_snapshot().len())
+            .filter(|fold| fold.placeholder.type_tag.is_none())
             .map(|fold| {
                 let start = fold
                     .range

@@ -888,6 +888,8 @@ actions!(
         ToggleSemanticHighlights,
         /// Toggles inline values display.
         ToggleInlineValues,
+        /// Toggles rendering the Markdown that comments are written in.
+        ToggleMarkdownComments,
         /// Toggles inline diagnostics display.
         ToggleInlineDiagnostics,
         /// Toggles edit prediction feature.

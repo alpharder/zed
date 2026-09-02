@@ -255,6 +255,10 @@
   // When set to false, Zed will use its built-in prompts. Note that on Linux,
   // this option is ignored and Zed will always use the built-in prompts.
   "use_system_prompts": true,
+  // Whether to render the Markdown that comments are written in: the markers
+  // are concealed and the text they mark is styled, while the comment that
+  // holds the cursor stays as it is.
+  "render_markdown_in_comments": false,
   // Whether the cursor blinks in the editor.
   "cursor_blink": true,
   // Cursor shape for the default editor.

@@ -178,6 +178,7 @@ pub enum HighlightKey {
     HoveredLinkState,
     InlineAssist,
     InputComposition,
+    MarkdownComment(crate::markdown_comments::MarkdownCommentStyle),
     MatchingBracket,
     NavigationOverlay(NavigationOverlayKey),
     PendingInput,

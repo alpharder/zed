@@ -35,6 +35,7 @@ pub mod items;
 mod jsx_tag_auto_close;
 mod linked_editing_ranges;
 mod lsp_ext;
+mod markdown_comments;
 mod mouse_context_menu;
 pub mod movement;
 mod persistence;
@@ -1167,6 +1168,15 @@ pub struct Editor {
     minimap: Option<Entity<Self>>,
     pub change_list: ChangeList,
     inline_value_cache: InlineValueCache,
+    /// `None` follows the setting; the toggle in the editor controls sets it for this editor.
+    markdown_comments_enabled: Option<bool>,
+    refresh_markdown_comments_task: Task<()>,
+    /// The ranges folded away for the Markdown of comments, kept so they can be replaced.
+    markdown_comment_folds: Vec<Range<Anchor>>,
+    /// The markup kinds currently highlighted, kept so the keys that go away can be cleared.
+    markdown_comment_styles: Vec<markdown_comments::MarkdownCommentStyle>,
+    /// The last Markdown applied to the comments, kept so an unchanged result is not rebuilt.
+    markdown_comment_spans: markdown_comments::MarkdownSpans,
     number_deleted_lines: bool,
 
     selection_drag_state: SelectionDragState,
@@ -2419,6 +2429,11 @@ impl Editor {
             diagnostics_enabled: full_mode,
             word_completions_enabled: full_mode,
             inline_value_cache: InlineValueCache::new(inlay_hint_settings.show_value_hints),
+            markdown_comments_enabled: None,
+            refresh_markdown_comments_task: Task::ready(()),
+            markdown_comment_folds: Vec::new(),
+            markdown_comment_styles: Vec::new(),
+            markdown_comment_spans: Default::default(),
             gutter_hovered: false,
             pixel_position_of_newest_cursor: None,
             last_bounds: None,
@@ -9998,6 +10013,7 @@ impl Editor {
             }
             multi_buffer::Event::Reparsed(buffer_id) => {
                 self.refresh_runnables(Some(*buffer_id), window, cx);
+                self.refresh_markdown_comments(cx);
                 self.refresh_selected_text_highlights(&self.display_snapshot(cx), true, window, cx);
                 self.colorize_brackets(true, cx);
                 jsx_tag_auto_close::refresh_enabled_in_any_buffer(self, multibuffer, cx);
@@ -10204,6 +10220,8 @@ impl Editor {
             if language_settings_changed || accents_changed {
                 self.colorize_brackets(true, cx);
             }
+
+            self.refresh_markdown_comments(cx);
 
             if language_settings_changed {
                 self.clear_disabled_lsp_folding_ranges(window, cx);

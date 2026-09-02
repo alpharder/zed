@@ -13,6 +13,11 @@ use crate::{
 #[with_fallible_options]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct EditorSettingsContent {
+    /// Whether to render the Markdown that comments are written in: the markers are concealed
+    /// and the text they mark is styled, while the comment that holds the cursor stays as it is.
+    ///
+    /// Default: false
+    pub render_markdown_in_comments: Option<bool>,
     /// Whether the cursor blinks in the editor.
     ///
     /// Default: true

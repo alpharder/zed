@@ -247,6 +247,7 @@ impl VsCodeSettings {
             auto_signature_help: self.read_bool("editor.parameterHints.enabled"),
             language_detection: self.read_bool("workbench.editor.languageDetection"),
             autoscroll_on_clicks: None,
+            render_markdown_in_comments: None,
             cursor_blink: self.read_enum("editor.cursorBlinking", |s| match s {
                 "blink" | "phase" | "expand" | "smooth" => Some(true),
                 "solid" => Some(false),
