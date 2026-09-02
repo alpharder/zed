@@ -19,6 +19,7 @@ Upstream caps open pull requests at three per author, so features queue here unt
 | Outline revamp | Symbol kinds as icons instead of keywords, `hidden_outline_symbols` to drop local noise, font size and line height for the panel and the modal | `languages.*.hidden_outline_symbols` (`["local"]`), `outline_panel.font_size`, `outline_panel.line_height` | `outline-revamp` | [#7](https://github.com/alpharder/zed/pull/7) | — |
 | Reveal in project panel button | Tab bar button next to the navigation buttons that reveals the active file in the project panel | `tab_bar.show_reveal_in_project_panel_button` (off) | `tab-bar-reveal-button` | — | — |
 | Editor scrollbar width | The width of the editor scrollbar is configurable | `scrollbar.width` (15) | `editor-scrollbar-width` | — | — |
+| Markdown in comments | The Markdown of a comment is rendered in place: the markers are folded away, the text they mark is styled, and the comment holding the cursor stays as its source | `render_markdown_in_comments` (off), Editor Controls → Markdown Comments, `editor::ToggleMarkdownComments` | `editor-markdown-comments` | — | — |
 
 ## Notes
 
