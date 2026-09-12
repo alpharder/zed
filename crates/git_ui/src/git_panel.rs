@@ -194,6 +194,42 @@ enum TrashCancel {
     Cancel,
 }
 
+/// A view-level filter over the kinds of changes shown in the panel.
+/// Conflicted entries are always shown.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct GitStatusFilter {
+    show_added: bool,
+    show_modified: bool,
+    show_deleted: bool,
+}
+
+impl Default for GitStatusFilter {
+    fn default() -> Self {
+        Self {
+            show_added: true,
+            show_modified: true,
+            show_deleted: true,
+        }
+    }
+}
+
+impl GitStatusFilter {
+    fn is_active(&self) -> bool {
+        *self != Self::default()
+    }
+
+    fn allows(&self, status: FileStatus) -> bool {
+        if status.is_created() {
+            self.show_added
+        } else if status.is_deleted() {
+            self.show_deleted
+        } else {
+            // Everything else (including type changes) summarizes as modified.
+            self.show_modified
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct GitPanelViewOptionsMenuState {
     sort_by: GitPanelSortBy,
@@ -1063,6 +1099,10 @@ pub struct GitPanel {
     entry_count: usize,
     changes_count: usize,
     diff_stat_total: DiffStat,
+    status_filter: GitStatusFilter,
+    /// Every change in the repository, regardless of the status filter.
+    /// Counts and whole-repository actions must use this, not `entries`.
+    all_status_entries: Vec<GitStatusEntry>,
     new_staged_count: usize,
     pending_commit: Option<Task<()>>,
     pending_remote_operation: Option<RemoteOperationKind>,
@@ -1364,6 +1404,8 @@ impl GitPanel {
                 new_staged_count: 0,
                 changes_count: 0,
                 diff_stat_total: DiffStat::default(),
+                status_filter: GitStatusFilter::default(),
+                all_status_entries: Vec::new(),
                 pending_commit: None,
                 pending_remote_operation: None,
                 amend_pending,
@@ -2056,11 +2098,7 @@ impl GitPanel {
     }
 
     fn change_entries_by_path(&self) -> impl Iterator<Item = &GitStatusEntry> {
-        // A grouping can project one changed file into multiple list rows.
-        self.entries
-            .iter()
-            .filter_map(GitListEntry::status_entry)
-            .unique_by(|entry| entry.repo_path.clone())
+        self.all_status_entries.iter()
     }
 
     fn directory_descendants(&self, entry_index: usize) -> Option<&[GitStatusEntry]> {
@@ -4927,6 +4965,7 @@ impl GitPanel {
         let repo = repo.read(cx);
 
         self.stash_entries = repo.cached_stash();
+        self.all_status_entries.clear();
 
         for status_entry in repo.cached_status() {
             self.changes_count += 1;
@@ -4950,6 +4989,8 @@ impl GitPanel {
                 diff_stat: status_entry.diff_stat,
             };
 
+            self.all_status_entries.push(entry.clone());
+
             if !is_conflict && !is_new {
                 tracked_entries.push(entry.clone());
             }
@@ -4957,6 +4998,12 @@ impl GitPanel {
             if staging.has_staged() {
                 staged_count += 1;
                 single_staged_entry = Some(entry.clone());
+            }
+
+            // The status filter only affects which entries are displayed;
+            // counts and whole-repository actions keep seeing every change.
+            if !is_conflict && !self.status_filter.allows(entry.status) {
+                continue;
             }
 
             if group_by_staging_state && is_conflict {
@@ -5625,6 +5672,79 @@ impl GitPanel {
         path + file_name + depth * 2
     }
 
+    fn render_status_filter_menu(
+        &self,
+        id: impl Into<ElementId>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let panel = cx.weak_entity();
+        let filter_active = self.status_filter.is_active();
+
+        PopoverMenu::new(id.into())
+            .trigger_with_tooltip(
+                IconButton::new("status-filter-trigger", IconName::Funnel)
+                    .icon_size(IconSize::Small)
+                    .when(filter_active, |this| this.icon_color(Color::Accent)),
+                Tooltip::text(if filter_active {
+                    "Filter Changes (Active)"
+                } else {
+                    "Filter Changes"
+                }),
+            )
+            .menu(move |window, cx| {
+                let panel = panel.clone();
+                Some(ContextMenu::build_persistent(
+                    window,
+                    cx,
+                    move |context_menu, _, cx| {
+                        let Some(filter) =
+                            panel.upgrade().map(|panel| panel.read(cx).status_filter)
+                        else {
+                            return context_menu;
+                        };
+                        let toggle =
+                            |panel: &WeakEntity<GitPanel>, apply: fn(&mut GitStatusFilter)| {
+                                let panel = panel.clone();
+                                move |window: &mut Window, cx: &mut App| {
+                                    panel
+                                        .update(cx, |panel, cx| {
+                                            apply(&mut panel.status_filter);
+                                            panel.update_visible_entries(window, cx);
+                                        })
+                                        .ok();
+                                }
+                            };
+                        context_menu
+                            .header("Display")
+                            .toggleable_entry(
+                                "Added",
+                                filter.show_added,
+                                IconPosition::End,
+                                None,
+                                toggle(&panel, |filter| filter.show_added = !filter.show_added),
+                            )
+                            .toggleable_entry(
+                                "Modified",
+                                filter.show_modified,
+                                IconPosition::End,
+                                None,
+                                toggle(&panel, |filter| {
+                                    filter.show_modified = !filter.show_modified
+                                }),
+                            )
+                            .toggleable_entry(
+                                "Deleted",
+                                filter.show_deleted,
+                                IconPosition::End,
+                                None,
+                                toggle(&panel, |filter| filter.show_deleted = !filter.show_deleted),
+                            )
+                    },
+                ))
+            })
+            .anchor(Anchor::TopRight)
+    }
+
     fn render_view_options_menu(&self, id: impl Into<ElementId>) -> impl IntoElement {
         let focus_handle = self.focus_handle.clone();
 
@@ -6055,6 +6175,7 @@ impl GitPanel {
                 .child(
                     h_flex()
                         .gap_1()
+                        .child(self.render_status_filter_menu("status_filter_menu", cx))
                         .child(self.render_view_options_menu("view_options_menu"))
                         .child(self.render_git_changes_actions_button(cx)),
                 ),
@@ -7154,6 +7275,34 @@ impl GitPanel {
     }
 
     fn render_no_changes_ui(&self, cx: &Context<Self>) -> AnyElement {
+        if self.status_filter.is_active() && !self.all_status_entries.is_empty() {
+            return v_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Label::new(format!(
+                        "{} {} hidden by the filter",
+                        self.all_status_entries.len(),
+                        if self.all_status_entries.len() == 1 {
+                            "change"
+                        } else {
+                            "changes"
+                        }
+                    ))
+                    .color(Color::Muted),
+                )
+                .child(
+                    Button::new("clear_status_filter", "Clear Filter")
+                        .label_size(LabelSize::Small)
+                        .style(ButtonStyle::Outlined)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.status_filter = GitStatusFilter::default();
+                            this.update_visible_entries(window, cx);
+                        })),
+                )
+                .into_any_element();
+        }
+
         let show_branch_diff = self.changes_count == 0 && !self.is_on_main_branch(cx);
 
         v_flex()
@@ -9333,6 +9482,105 @@ mod tests {
             new_entries.first(),
             Some((GitListEntry::Directory(entry), _)) if entry.expanded
         ));
+    }
+
+    #[gpui::test]
+    async fn test_status_filter_hides_filtered_entries(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "added.rs": "fn added() {}",
+                "modified.rs": "fn modified() {}",
+            }),
+        )
+        .await;
+
+        fs.set_head_for_repo(
+            Path::new(path!("/project/.git")),
+            &[
+                ("modified.rs", "fn old() {}".to_string()),
+                ("deleted.rs", "fn deleted() {}".to_string()),
+            ],
+            "deadbeef",
+        );
+        fs.set_index_for_repo(
+            Path::new(path!("/project/.git")),
+            &[
+                ("modified.rs", "fn old() {}".to_string()),
+                ("deleted.rs", "fn deleted() {}".to_string()),
+            ],
+        );
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+
+        cx.executor().run_until_parked();
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+        await_git_panel_entries(&panel, cx).await;
+
+        let status_paths = |panel: &GitPanel| -> Vec<RepoPath> {
+            panel
+                .entries
+                .iter()
+                .filter_map(|entry| entry.status_entry().map(|status| status.repo_path.clone()))
+                .collect()
+        };
+
+        panel.read_with(cx, |panel, _| {
+            assert!(!panel.status_filter.is_active());
+            assert_eq!(status_paths(panel).len(), 3);
+        });
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel.status_filter.show_added = false;
+            panel.status_filter.show_deleted = false;
+            panel.update_visible_entries(window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            assert!(panel.status_filter.is_active());
+            assert_eq!(status_paths(panel), vec![repo_path("modified.rs")]);
+            // Counts and whole-repository actions must keep seeing every
+            // change, or staging/commit affordances act on hidden files.
+            assert_eq!(panel.entry_count, 3);
+            assert_eq!(panel.all_status_entries.len(), 3);
+            assert_eq!(panel.change_entries_by_path().count(), 3);
+        });
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel.status_filter = GitStatusFilter::default();
+            panel.update_visible_entries(window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            assert!(!panel.status_filter.is_active());
+            assert_eq!(status_paths(panel).len(), 3);
+        });
     }
 
     fn register_git_commit_language(project: &Entity<Project>, cx: &mut VisualTestContext) {
