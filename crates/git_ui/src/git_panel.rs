@@ -205,13 +205,40 @@ enum TrashCancel {
     Cancel,
 }
 
+/// The extension a changed file is grouped under in the status filter. `None` stands for a file
+/// without one, such as `Makefile` or `.gitignore`.
+type FileExtension = Option<SharedString>;
+
+fn file_extension(path: &RelPath) -> FileExtension {
+    path.extension()
+        .map(|extension| extension.to_lowercase().into())
+}
+
+/// The extensions of the given changes, each once, with files that have no extension last.
+fn status_extensions(entries: &[GitStatusEntry]) -> Vec<FileExtension> {
+    let mut extensions = entries
+        .iter()
+        .map(|entry| file_extension(&entry.repo_path))
+        .collect::<Vec<_>>();
+    extensions.sort_by(|left, right| {
+        left.is_none()
+            .cmp(&right.is_none())
+            .then_with(|| left.cmp(right))
+    });
+    extensions.dedup();
+    extensions
+}
+
 /// A view-level filter over the kinds of changes shown in the panel.
 /// Conflicted entries are always shown.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct GitStatusFilter {
     show_added: bool,
     show_modified: bool,
     show_deleted: bool,
+    /// The extensions the user chose to hide. Kept as the hidden ones rather than the shown ones,
+    /// so a file with an extension that was not among the changes before shows up.
+    hidden_extensions: HashSet<FileExtension>,
 }
 
 impl Default for GitStatusFilter {
@@ -220,24 +247,35 @@ impl Default for GitStatusFilter {
             show_added: true,
             show_modified: true,
             show_deleted: true,
+            hidden_extensions: HashSet::default(),
         }
     }
 }
 
 impl GitStatusFilter {
-    fn is_active(&self) -> bool {
-        *self != Self::default()
+    /// Whether the filter hides any of the given changes. A hidden extension that none of the
+    /// changes has hides nothing, so it does not make the filter active.
+    fn is_active(&self, entries: &[GitStatusEntry]) -> bool {
+        !(self.show_added && self.show_modified && self.show_deleted)
+            || (!self.hidden_extensions.is_empty()
+                && entries.iter().any(|entry| {
+                    self.hidden_extensions
+                        .contains(&file_extension(&entry.repo_path))
+                }))
     }
 
-    fn allows(&self, status: FileStatus) -> bool {
-        if status.is_created() {
+    fn allows(&self, status: FileStatus, path: &RelPath) -> bool {
+        let status_shown = if status.is_created() {
             self.show_added
         } else if status.is_deleted() {
             self.show_deleted
         } else {
             // Everything else (including type changes) summarizes as modified.
             self.show_modified
-        }
+        };
+        status_shown
+            && (self.hidden_extensions.is_empty()
+                || !self.hidden_extensions.contains(&file_extension(path)))
     }
 }
 
@@ -5650,7 +5688,7 @@ impl GitPanel {
 
             // The status filter only affects which entries are displayed;
             // counts and whole-repository actions keep seeing every change.
-            if !is_conflict && !self.status_filter.allows(entry.status) {
+            if !is_conflict && !self.status_filter.allows(entry.status, &entry.repo_path) {
                 continue;
             }
 
@@ -6056,7 +6094,13 @@ impl GitPanel {
         let change_entries = self.change_entries_by_path().cloned().collect::<Vec<_>>();
         for status_entry in change_entries {
             self.entry_count += 1;
-            if let Some(diff_stat) = status_entry.diff_stat {
+            // The counts cover every change, but the line total describes the list the user sees,
+            // so it follows the filter. Conflicts are never filtered out of the list.
+            let shown = repo.had_conflict_on_last_merge_head_change(&status_entry.repo_path)
+                || self
+                    .status_filter
+                    .allows(status_entry.status, &status_entry.repo_path);
+            if shown && let Some(diff_stat) = status_entry.diff_stat {
                 self.diff_stat_total.added =
                     self.diff_stat_total.added.saturating_add(diff_stat.added);
                 self.diff_stat_total.deleted = self
@@ -6359,7 +6403,7 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let panel = cx.weak_entity();
-        let filter_active = self.status_filter.is_active();
+        let filter_active = self.status_filter.is_active(&self.all_status_entries);
 
         PopoverMenu::new(id.into())
             .trigger_with_tooltip(
@@ -6378,9 +6422,13 @@ impl GitPanel {
                     window,
                     cx,
                     move |context_menu, _, cx| {
-                        let Some(filter) =
-                            panel.upgrade().map(|panel| panel.read(cx).status_filter)
-                        else {
+                        let Some((filter, extensions)) = panel.upgrade().map(|panel| {
+                            let panel = panel.read(cx);
+                            (
+                                panel.status_filter.clone(),
+                                status_extensions(&panel.all_status_entries),
+                            )
+                        }) else {
                             return context_menu;
                         };
                         let toggle =
@@ -6420,6 +6468,38 @@ impl GitPanel {
                                 None,
                                 toggle(&panel, |filter| filter.show_deleted = !filter.show_deleted),
                             )
+                            .when(!extensions.is_empty(), |menu| {
+                                extensions.into_iter().fold(
+                                    menu.separator().header("Extensions"),
+                                    |menu, extension| {
+                                        let shown = !filter.hidden_extensions.contains(&extension);
+                                        let label = match &extension {
+                                            Some(extension) => format!(".{extension}"),
+                                            None => "No Extension".to_string(),
+                                        };
+                                        let panel = panel.clone();
+                                        menu.toggleable_entry(
+                                            label,
+                                            shown,
+                                            IconPosition::End,
+                                            None,
+                                            move |window, cx| {
+                                                panel
+                                                    .update(cx, |panel, cx| {
+                                                        let hidden = &mut panel
+                                                            .status_filter
+                                                            .hidden_extensions;
+                                                        if !hidden.remove(&extension) {
+                                                            hidden.insert(extension.clone());
+                                                        }
+                                                        panel.update_visible_entries(window, cx);
+                                                    })
+                                                    .ok();
+                                            },
+                                        )
+                                    },
+                                )
+                            })
                     },
                 ))
             })
@@ -7989,7 +8069,9 @@ impl GitPanel {
     }
 
     fn render_no_changes_ui(&self, cx: &Context<Self>) -> AnyElement {
-        if self.status_filter.is_active() && !self.all_status_entries.is_empty() {
+        if self.status_filter.is_active(&self.all_status_entries)
+            && !self.all_status_entries.is_empty()
+        {
             return v_flex()
                 .gap_1()
                 .items_center()
@@ -10556,7 +10638,7 @@ mod tests {
         };
 
         panel.read_with(cx, |panel, _| {
-            assert!(!panel.status_filter.is_active());
+            assert!(!panel.status_filter.is_active(&panel.all_status_entries));
             assert_eq!(status_paths(panel).len(), 3);
         });
 
@@ -10568,7 +10650,7 @@ mod tests {
         await_git_panel_entries(&panel, cx).await;
 
         panel.read_with(cx, |panel, _| {
-            assert!(panel.status_filter.is_active());
+            assert!(panel.status_filter.is_active(&panel.all_status_entries));
             assert_eq!(status_paths(panel), vec![repo_path("modified.rs")]);
             // Counts and whole-repository actions must keep seeing every
             // change, or staging/commit affordances act on hidden files.
@@ -10584,8 +10666,157 @@ mod tests {
         await_git_panel_entries(&panel, cx).await;
 
         panel.read_with(cx, |panel, _| {
-            assert!(!panel.status_filter.is_active());
+            assert!(!panel.status_filter.is_active(&panel.all_status_entries));
             assert_eq!(status_paths(panel).len(), 3);
+        });
+    }
+
+    #[test]
+    fn test_file_extension_grouping() {
+        let extension = |path: &str| {
+            file_extension(RelPath::from_unix_str(path).unwrap()).map(|e| e.to_string())
+        };
+        assert_eq!(extension("src/app.ts").as_deref(), Some("ts"));
+        assert_eq!(
+            extension("src/Legacy.TS").as_deref(),
+            Some("ts"),
+            "extensions are grouped regardless of case"
+        );
+        assert_eq!(
+            extension("src/types.d.ts").as_deref(),
+            Some("ts"),
+            "a compound suffix is grouped under its last extension"
+        );
+        assert_eq!(extension("Makefile"), None);
+        assert_eq!(
+            extension(".gitignore"),
+            None,
+            "a dotfile has no extension of its own"
+        );
+        assert_eq!(extension("docs/README"), None);
+    }
+
+    #[gpui::test]
+    async fn test_extension_filter_hides_entries_and_updates_the_line_total(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "a.ts": "one\ntwo\n",
+                "b.TS": "new\n",
+                "c.md": "a\nb\nc\n",
+                "Makefile": "all:\nbuild:\n",
+            }),
+        )
+        .await;
+
+        let head = [
+            ("a.ts", "one\n".to_string()),
+            ("b.TS", "old\n".to_string()),
+            ("c.md", "a\n".to_string()),
+            ("Makefile", "all:\n".to_string()),
+        ];
+        fs.set_head_for_repo(Path::new(path!("/project/.git")), &head, "deadbeef");
+        fs.set_index_for_repo(Path::new(path!("/project/.git")), &head);
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+        cx.executor().run_until_parked();
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+        await_git_panel_entries(&panel, cx).await;
+        cx.executor().run_until_parked();
+        await_git_panel_entries(&panel, cx).await;
+
+        let status_paths = |panel: &GitPanel| -> Vec<RepoPath> {
+            panel
+                .entries
+                .iter()
+                .filter_map(|entry| entry.status_entry().map(|status| status.repo_path.clone()))
+                .collect()
+        };
+        let line_total =
+            |panel: &GitPanel| (panel.diff_stat_total.added, panel.diff_stat_total.deleted);
+
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(
+                status_extensions(&panel.all_status_entries),
+                vec![Some("md".into()), Some("ts".into()), None],
+                "the menu offers the extensions of the changes, each once, files without one last"
+            );
+            assert_eq!(status_paths(panel).len(), 4);
+            // The fake repository counts a changed file as replaced whole: every new line added,
+            // every old line deleted. a.ts +2 -1, b.TS +1 -1, c.md +3 -1, Makefile +2 -1.
+            assert_eq!(line_total(panel), (8, 4));
+            assert!(!panel.status_filter.is_active(&panel.all_status_entries));
+        });
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel
+                .status_filter
+                .hidden_extensions
+                .insert(Some("ts".into()));
+            panel.update_visible_entries(window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(
+                status_paths(panel),
+                vec![repo_path("Makefile"), repo_path("c.md")],
+                "both spellings of the hidden extension are hidden"
+            );
+            assert_eq!(
+                line_total(panel),
+                (5, 2),
+                "the line total follows the files the filter shows"
+            );
+            assert!(panel.status_filter.is_active(&panel.all_status_entries));
+            // Counts and whole-repository actions keep seeing every change.
+            assert_eq!(panel.entry_count, 4);
+            assert_eq!(panel.all_status_entries.len(), 4);
+        });
+
+        panel.update_in(cx, |panel, window, cx| {
+            panel.status_filter = GitStatusFilter::default();
+            panel
+                .status_filter
+                .hidden_extensions
+                .insert(Some("rs".into()));
+            panel.update_visible_entries(window, cx);
+        });
+        await_git_panel_entries(&panel, cx).await;
+
+        panel.read_with(cx, |panel, _| {
+            assert!(
+                !panel.status_filter.is_active(&panel.all_status_entries),
+                "an extension none of the changes has hides nothing, so the filter is not active"
+            );
+            assert_eq!(status_paths(panel).len(), 4);
+            assert_eq!(line_total(panel), (8, 4));
         });
     }
 

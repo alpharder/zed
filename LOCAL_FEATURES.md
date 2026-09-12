@@ -12,7 +12,7 @@ Upstream caps open pull requests at three per author, so features queue here unt
 | Expand / collapse all | One state-aware button in the git panel header, plus context menu entries and key bindings | `git_panel::ExpandAllEntries` / `CollapseAllEntries`, `ctrl-right` / `ctrl-left` | `git-panel-expand-collapse-all` | [#2](https://github.com/alpharder/zed/pull/2) | — |
 | Sticky directories | Ancestor directories stay pinned while the git panel tree scrolls | `git_panel.sticky_scroll` (off) | `git-panel-sticky-scroll` | [#3](https://github.com/alpharder/zed/pull/3) | — |
 | Preview tabs from the git panel | Entries opened from the git panel reuse the preview tab | `preview_tabs.enable_preview_from_git_panel` (on) | `git-panel-preview-tabs` | [#4](https://github.com/alpharder/zed/pull/4) | [#62915](https://github.com/zed-industries/zed/pull/62915) — open |
-| Status filter | Funnel button that filters the changes list by added / modified / deleted, per session | git panel header button | `git-panel-status-filter` | [#5](https://github.com/alpharder/zed/pull/5) | — |
+| Status filter | Funnel button that filters the changes list by added / modified / deleted and by the file extensions present among the changes (plus No Extension), per session; the View Diff line total follows the filter | git panel header button | `git-panel-status-filter` (extensions: **only on `integration`** so far) | [#5](https://github.com/alpharder/zed/pull/5) | — |
 | Sort by lines changed | Third sort mode in the git panel list view | `git_panel.sort_by: "lines_changed"` | **none yet** (only on `integration`) | — | — |
 | Markdown highlight paint order | Search and selection highlights no longer cover the preview text | — | `markdown-highlight-paint-order` | [#6](https://github.com/alpharder/zed/pull/6) | [#62963](https://github.com/zed-industries/zed/pull/62963) — open |
 | Outline modal in the markdown preview | `ctrl-shift-o` works in the preview, the preview follows outline navigation, and a single click in the outline panel scrolls it | `ctrl-shift-o` in the `MarkdownPreview` context | **none yet** (only on `integration`) | — | — |
@@ -32,4 +32,4 @@ Upstream caps open pull requests at three per author, so features queue here unt
 - `README.md` on every feature branch keeps the `> [!IMPORTANT]` review marker that upstream's
   `.rules` asks for. Remove it by hand after reviewing the diff, before submitting.
 - The daily Windows build: `zed-win-build release`, then reinstall the matching dev remote server
-  (`cargo build -p remote_server --features debug-embed`, copy to `~/.zed_server/`).
+  (`cargo build -p remote_server --features remote_server/debug-embed,util/debug-embed`, copy to `~/.zed_server/`). Dev clients need `util/debug-embed` too; `zed-win-build debug` passes it.
